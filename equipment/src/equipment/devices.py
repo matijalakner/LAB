@@ -1,5 +1,8 @@
 """`equipment devices`: which instruments are connected right now.
 
+The pE-300 is listed when its serial port identifies as CoolLED; if it does not,
+`equipment pe300 status` still finds it by asking every USB serial port.
+
 Every probe is independent: a missing library or a permission problem is
 reported for that instrument only and never stops the others.
 """
@@ -37,6 +40,11 @@ def probe_canon():
     return [(str(name), f"port {port}") for name, port in gp.Camera.autodetect()]
 
 
+def probe_pe300():
+    from .coolled.pe300 import candidate_ports
+    return [("CoolLED pE-300", f"port {dev} ({desc})") for dev, desc in candidate_ports()]
+
+
 def probe_flir():
     from .flir.backends import list_cameras
     found = list_cameras("auto")
@@ -54,7 +62,9 @@ def probe_flir():
             for backend, vendor, model, serial in found]
 
 
-PROBES = (("Thorlabs (USB)", probe_thorlabs), ("Canon (gphoto2)", probe_canon),
+PROBES = (("Thorlabs (USB)", probe_thorlabs),
+          ("CoolLED (USB serial)", probe_pe300),
+          ("Canon (gphoto2)", probe_canon),
           ("FLIR (USB3 Vision)", probe_flir))
 
 
@@ -74,6 +84,8 @@ def main_devices(cfg=None):
             print("  nothing connected")
         for name, detail in found:
             print(f"  {name:<28} {detail}")
-    print(f"\nConfigured Thorlabs resources:\n  DC2200 {dc2200_resource()}\n"
-          f"  PM400  {pm_resource()}")
+    import os
+    pe_port = os.environ.get("EQUIPMENT_PE300_PORT") or "automatic"
+    print(f"\nConfigured:\n  DC2200 {dc2200_resource()}\n"
+          f"  PM400  {pm_resource()}\n  pE-300 port {pe_port}")
     return result

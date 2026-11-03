@@ -4,8 +4,8 @@ One place for the USB identifiers, so the resource string and the product ID
 used for the kernel-driver detach can never disagree again.
 """
 import os
-import time
 
+from ..utils import close_quietly, sleep_until  # noqa: F401  (used by the modules here)
 from .usb_driver import THORLABS_VENDOR_ID
 
 
@@ -36,19 +36,3 @@ def pm_resource(serial=None):
     """VISA resource of the PM400: serial argument > $EQUIPMENT_PM400_SERIAL > default."""
     return make_resource(PM_PRODUCT_ID,
                          serial or os.environ.get("EQUIPMENT_PM400_SERIAL") or PM_SERIAL)
-
-
-def sleep_until(deadline):
-    """Sleep until a time.monotonic() deadline (no accumulated drift)."""
-    remaining = deadline - time.monotonic()
-    if remaining > 0:
-        time.sleep(remaining)
-
-
-def close_quietly(obj):
-    close = getattr(obj, "close", None)
-    if callable(close):
-        try:
-            close()
-        except Exception:
-            pass

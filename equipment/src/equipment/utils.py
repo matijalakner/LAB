@@ -1,5 +1,6 @@
 """Small helpers shared by all instrument modules."""
 import csv
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -90,3 +91,19 @@ def match_choice(value, choices):
         return partial[0]
     raise ValueError(f"'{value}' is not offered by the camera; choose one of: "
                      + ", ".join(choices))
+
+
+def sleep_until(deadline):
+    """Sleep until a time.monotonic() deadline (no accumulated drift)."""
+    remaining = deadline - time.monotonic()
+    if remaining > 0:
+        time.sleep(remaining)
+
+
+def close_quietly(obj):
+    close = getattr(obj, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass

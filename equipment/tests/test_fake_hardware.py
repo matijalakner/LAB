@@ -5,7 +5,7 @@ import csv
 import pytest
 
 from equipment import cli
-from equipment.experiments import ramp_camera
+from equipment.experiments import paired_ramp, ramp_camera
 from equipment.thorlabs import dc2200
 
 
@@ -109,7 +109,7 @@ def test_led_is_switched_off_when_a_step_fails(fake_dc2200, monkeypatch):
 
 def test_ramp_with_photos_through_the_cli(fake_dc2200, monkeypatch, tmp_path):
     cam = FakeCamera()
-    monkeypatch.setattr(ramp_camera, "_connect", lambda get: cam)
+    monkeypatch.setattr(paired_ramp, "_connect_canon", lambda get: cam)
     cli.main(["dc2200", "ramp", "--min", "0", "--max", "0.1", "--step", "0.1",
               "--step-time", "0.05", "--photos", "run", "--shutter", "1/250",
               "--output-dir", str(tmp_path / "out"), "--output-csv", "r.csv",

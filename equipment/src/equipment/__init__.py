@@ -1,9 +1,12 @@
 """Drivers and terminal control for the lab equipment.
 
-    equipment.thorlabs      DC2200 LED driver, PM400 power meter, LIV measurement
+    equipment.sources       one interface for every light source (DC2200, pE-300)
+    equipment.ramp          stepped ramp of any light source
+    equipment.thorlabs      DC2200 LED driver, PM400 power meter
+    equipment.coolled       CoolLED pE-300 LED illumination
     equipment.canon         Canon EOS R10 over USB (libgphoto2)
     equipment.flir          FLIR Blackfly S over USB3 Vision (Spinnaker or Aravis)
-    equipment.experiments   DC2200 ramp with photos from either camera
+    equipment.experiments   pairings: ramp + photos/power (paired_ramp), LIV (liv)
 
 The names below are imported lazily: ``from equipment import main_ramp`` does
 not load OpenCV, gphoto2 or the camera SDKs, and a missing hardware library
@@ -11,17 +14,31 @@ only gives an error when that instrument is actually used.
 """
 from importlib import import_module
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 _EXPORTS = {
     # Thorlabs
     "main_ramp": "thorlabs.dc2200",
     "main_set_current": "thorlabs.dc2200",
-    "ramp_levels": "thorlabs.dc2200",
-    "ramp_sequence": "thorlabs.dc2200",
+    "ramp_levels": "ramp",
+    "ramp_sequence": "ramp",
     "main_power_measurement": "thorlabs.pm400",
     "PM400": "thorlabs.pm400",
-    "main_liv_measurement": "thorlabs.liv",
+    "main_liv_measurement": "experiments.liv",
+    "DC2200Source": "thorlabs.dc2200",
+    "open_pm400": "thorlabs.pm400",
+    # CoolLED
+    "PE300": "coolled.pe300",
+    "PE300Source": "coolled.pe300",
+    "main_pe300_set": "coolled.pe300",
+    "main_pe300_off": "coolled.pe300",
+    "main_pe300_status": "coolled.pe300",
+    # any light source
+    "LightSource": "sources",
+    "make_source": "sources",
+    "run_ramp": "ramp",
+    "main_source_ramp": "ramp",
+    "main_paired_ramp": "experiments.paired_ramp",
     "ThorlabsUSBDriver": "thorlabs.usb_driver",
     # Canon
     "CanonCamera": "canon.camera",

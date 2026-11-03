@@ -4,13 +4,23 @@ Drivers and terminal control for the lab equipment:
 
 | Instrument | Command | Python |
 |---|---|---|
-| Thorlabs **DC2200** LED driver | `equipment dc2200 set / off / ramp` | `equipment.thorlabs.dc2200` |
+| Thorlabs **DC2200** LED driver (A) | `equipment dc2200 set / off / ramp` | `equipment.thorlabs.dc2200` |
+| CoolLED **pE-300** white/ultra (%) | `equipment pe300 set / off / status / ramp` | `equipment.coolled.pe300` |
 | Thorlabs **PM400** power meter | `equipment pm400 measure` | `equipment.thorlabs.pm400` |
-| DC2200 + PM400 together (LIV curve) | `equipment liv` | `equipment.thorlabs.liv` |
 | **Canon EOS R10** (USB, libgphoto2) | `equipment canon info / photo / timelapse / video` | `equipment.canon` |
 | **FLIR Blackfly S** BFS-U3-27S5C-C (USB3 Vision) | `equipment flir list / info / photo / timelapse / video` | `equipment.flir` |
-| DC2200 ramp with photos from either camera | `equipment dc2200 ramp ... --photos NAME` | `equipment.experiments.ramp_camera` |
+| Any light source + photos and/or power | `equipment <dc2200\|pe300> ramp ... --photos NAME --power` | `equipment.experiments.paired_ramp` |
+| Any light source + PM400 (LIV curve) | `equipment liv --source <dc2200\|pe300>` | `equipment.experiments.liv` |
 | What is connected | `equipment devices` | `equipment.devices` |
+
+**Pairing.** Both light sources are behind one interface (`equipment.sources`), so any of them can be combined with any measurement:
+
+| | Canon photos | FLIR photos | PM400 power |
+|---|---|---|---|
+| **DC2200** | `dc2200 ramp ... --photos NAME` | `... --photos NAME --camera flir` | `dc2200 ramp ... --power`, `liv --source dc2200` |
+| **pE-300** | `pe300 ramp ... --photos NAME` | `... --photos NAME --camera flir` | `pe300 ramp ... --power`, `liv --source pe300` |
+
+`--photos` and `--power` can be used together, for example pE-300 + FLIR + PM400 in one run.
 
 The code was split out of [LineTracker](https://github.com/matijalakner/LineTracker) (its `src/Canon`, `src/FLIR`, `src/ThorLabs`). The file layout and CSV formats are unchanged, so LineTracker's `measurement analysis folder` and `analysis report` read the photos and ramp logs written here as they are.
 
@@ -19,6 +29,7 @@ The code was split out of [LineTracker](https://github.com/matijalakner/LineTrac
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Command reference](#command-reference)
+  - [pE-300](#coolled-pe-300) · [Pairing](#pairing-photos-and-power-during-a-ramp)
 - [Where the data goes](#where-the-data-goes)
 - [Instrument setup](#instrument-setup)
 - [Python API](#python-api)
@@ -37,6 +48,7 @@ cd equipment
 python3 -m venv --system-site-packages equip   # system site packages: needed for Aravis (FLIR)
 source equip/bin/activate
 pip install -e ".[thorlabs]"        # DC2200, PM400, LIV:  pyusb, pyvisa, pyvisa-py
+pip install -e ".[coolled]"         # pE-300:              pyserial
 pip install -e ".[canon]"           # Canon:               python-gphoto2 (needs libgphoto2)
 pip install -e ".[flir]"            # FLIR:                numpy, opencv-python, pillow
 pip install -e ".[all]"             # everything above
@@ -73,6 +85,18 @@ equipment dc2200 ramp --min 0 --max 0.5 --step 0.05 --step-time 2 \
 equipment dc2200 ramp --min 0 --max 0.5 --step 0.05 --step-time 2 \
     --photos mysample --camera flir --shutter 1/250 --gain 0 --wb off
 
+equipment pe300 status                              # channels, intensities, firmware
+equipment pe300 set 30                              # white (A+B+C) at 30 %, stays on
+equipment pe300 set 50 --channels B                 # blue only
+equipment pe300 off
+equipment pe300 ramp --min 0 --max 100 --step 10 --step-time 2
+
+# pairings
+equipment pe300 ramp --min 0 --max 100 --step 10 --step-time 5 --power --wavelength 470
+equipment pe300 ramp --min 0 --max 100 --step 10 --step-time 10 \
+    --photos mysample --camera flir --shutter 1/250 --gain 0 --wb off --power
+equipment liv --source pe300 --max 100 --channels B --ramp-duration 20
+
 equipment pm400 measure --wavelength 450 --duration 5 --rate 10
 equipment liv --max 0.05 --ramp-duration 10
 
@@ -90,7 +114,7 @@ Every command has its own help: `equipment dc2200 ramp -h`, `equipment flir phot
 
 ### `equipment devices`
 
-This command lists the Thorlabs USB devices with their serial numbers, the cameras gphoto2 sees, and the FLIR/GenICam cameras. It also prints the VISA resources the Thorlabs commands will use. A missing library is reported for its group only, so the other groups are still listed.
+This command lists the Thorlabs USB devices with their serial numbers, the pE-300 serial port, the cameras gphoto2 sees, and the FLIR/GenICam cameras. It also prints the VISA resources and the pE-300 port the commands will use. A missing library is reported for its group only, so the other groups are still listed.
 
 ### DC2200 LED driver
 
@@ -100,17 +124,41 @@ Currents are in **amperes** (0 – 2 A). Check your LED head's rating first. The
 |---|---|
 | `dc2200 set CURRENT` | Constant current. **The LED stays on.** The user current limit is set to the same value. `set 0` switches the output off. |
 | `dc2200 off` | Switches the output off. |
-| `dc2200 ramp --min A --max A --step A --step-time S [--cycles N]` | Steps min → max → min. The LED is switched off at the end, on any error and on Ctrl+C. |
+| `dc2200 ramp --min A --max A --step A --step-time S [--cycles N]` | Steps min → max → min. The LED is switched off at the end, on any error and on Ctrl+C. Can be [paired](#pairing-photos-and-power-during-a-ramp). |
 
 All DC2200 commands take `--dc2200-serial SN`.
 
-**How the ramp steps.** With `--min 0 --max 0.5 --step 0.1 --step-time 2` the current goes 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.4, 0.3, 0.2, 0.1, 0 A. Every value is held for 2 s, 22 s in total.
+### CoolLED pE-300
+
+Levels are **intensities in %** (0 – 100, whole percent) of the chosen channels. The pE-300white has three channels: A (violet/UV), B (blue) and C (green to red). All three together give white light.
+
+| Command | What it does |
+|---|---|
+| `pe300 set INTENSITY [--channels ABC]` | Lights the channels at that intensity and **leaves the light on**. The other channels are switched off. `set 0` switches the light off. |
+| `pe300 off` | Switches all channels off. Selection and intensities are kept. |
+| `pe300 status` | Shows the port, firmware, wavelengths, and the state and intensity of every channel. |
+| `pe300 ramp --min % --max % --step % --step-time S [--cycles N] [--channels ABC]` | The same stepped ramp as for the DC2200. Can be [paired](#pairing-photos-and-power-during-a-ramp). |
+
+Every pE-300 command takes:
+
+- `--port` (e.g. `/dev/ttyACM0`, `COM3`). The default is `$EQUIPMENT_PE300_PORT`, otherwise the port is found automatically.
+- `--channels`: any of `A`, `B`, `C`. The default is `ABC`.
+
+Every setting is read back from the unit and checked. If the Control Pod changes something at the same time, you get an error instead of wrong data.
+
+### How a ramp steps (both sources)
+
+With `--min 0 --max 0.5 --step 0.1 --step-time 2` the level goes 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.4, 0.3, 0.2, 0.1, 0. Every value is held for 2 s, 22 s in total. With `--min 0 --max 0.5 --step 0.1 --step-time 2` the current goes 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.4, 0.3, 0.2, 0.1, 0 A. Every value is held for 2 s, 22 s in total.
 
 - The maximum is not repeated.
 - If `max − min` is not a multiple of `step`, the last step up is shorter, so the ramp always reaches exactly `--max`.
 - The steps are timed from a clock, so they do not drift.
 
-**Ramp with photos.** These options are used together with `--photos NAME`:
+### Pairing: photos and power during a ramp
+
+`dc2200 ramp` and `pe300 ramp` take the same pairing options. Photos come from the Canon or the FLIR camera with `--photos NAME`. Power readings come from the PM400 with `--power`. You can use both together.
+
+These options go with `--photos NAME`:
 
 | Option | Meaning |
 |---|---|
@@ -122,13 +170,23 @@ All DC2200 commands take `--dc2200-serial SN`.
 | `--iso --color-temp --picture-style --image-format --sync-clock --keep-on-card` | Canon only |
 | `--gain --wb-red --wb-blue --gamma --black-level --pixel-format --save-format --quality --defaults --serial --backend` | FLIR only |
 
-How the ramp and the camera work together:
+These options go with `--power`:
 
-- The camera is connected first. If it is not found, the LED is never switched on.
-- The camera runs in its own thread, so a slow capture never delays a current step.
-- If the camera fails, the ramp stops and the LED is switched off.
-- A photo log `<ramp>_photos.csv` is written next to the ramp CSV. It uses the same t = 0 as the ramp CSV, and its `current_A` column is the current that was set when each photo was taken.
-- The CLI refuses camera options without `--photos`, and options that belong to the other camera.
+| Option | Meaning |
+|---|---|
+| `--power` | Read the optical power with the PM400 |
+| `--power-delay S` | One reading per step, `S` s after the step starts (default: half the step time) |
+| `--power-interval S` | Instead: a reading every `S` s from the ramp start |
+| `--wavelength NM`, `--averaging-count N`, `--pm400-serial SN` | PM400 settings (defaults 450 nm, 10) |
+
+How the light and the paired instruments work together:
+
+- The camera and the PM400 are connected first. If one of them is not found, the light is never switched on.
+- Each runs in its own thread, so a slow capture never delays a step.
+- If one of them fails, the ramp stops and the light is switched off.
+- Ctrl+C stops everything. Data taken so far is kept.
+- Logs are written next to the ramp CSV: `<ramp>_photos.csv` and `<ramp>_power.csv`. They use the same t = 0 and time stamp line as the ramp CSV. Their last column is the level that was set at each measurement (`current_A` or `intensity_pct`), so no device clock is needed to match them.
+- The CLI refuses camera options without `--photos`, PM400 options without `--power`, and options that belong to the other camera.
 
 ### PM400 power meter
 
@@ -142,14 +200,15 @@ How the ramp and the camera work together:
 | `--rate HZ` (`--sample-rate`) | 10 |
 | `--pm400-serial SN` | see [Thorlabs setup](#thorlabs-dc2200--pm400) |
 
-### LIV (DC2200 + PM400)
+### LIV (any light source + PM400)
 
-`equipment liv` ramps the current linearly up and down and reads the power at every point.
+`equipment liv` ramps a light source linearly up and down and reads the power at every point. Use `--source dc2200` (the default; levels in A) or `--source pe300` (levels in %, with `--channels` and `--port`).
 
 | Option | Default |
 |---|---|
-| `--min A` | 0 |
-| `--max A` | 0.05 |
+| `--source` | `dc2200` |
+| `--min LEVEL` | 0 |
+| `--max LEVEL` | 0.05 A (DC2200), 100 % (pE-300) |
 | `--ramp-duration S` | 10 |
 | `--update-rate HZ` | 10 |
 | `--cycles N` | 1 |
@@ -216,7 +275,7 @@ For measurements, fix the exposure, gain and white balance (`--shutter 1/250 --g
 
 | Command | File |
 |---|---|
-| `dc2200 ramp` | `output/ramp/ramp_<UTC>.csv`; with `--photos` also `output/ramp/ramp_<UTC>_photos.csv` and `input/folder/<name>/` |
+| `dc2200 ramp`, `pe300 ramp` | `output/ramp/ramp_<UTC>.csv`; with `--photos` also `ramp_<UTC>_photos.csv` and `input/folder/<name>/`; with `--power` also `ramp_<UTC>_power.csv` |
 | `pm400 measure` | `output/pm/pm_<UTC>.csv` |
 | `liv` | `output/liv/liv_<UTC>.csv` |
 | `canon ...` | `input/folder/<name>/<name>_XXXX.jpg`/`.mp4`, log `output/camera/camera_<UTC>.csv` |
@@ -228,11 +287,14 @@ The ramp, pm and camera CSVs start with a line `time_stamp,<UTC time at t = 0>`,
 
 | File | Columns |
 |---|---|
-| ramp | `time_s, cycle, direction, current_A` |
-| ramp photos | `time_s, index, file, utc, step, cycle, direction, current_A` |
+| ramp | `time_s, cycle, direction, LEVEL` |
+| ramp photos | `time_s, index, file, utc, step, cycle, direction, LEVEL` |
+| ramp power | `time_s, power_W, utc, step, cycle, direction, LEVEL` |
 | pm | `time_s, power_W` |
-| liv | `time_s, cycle, direction, current_A, power_W` (no time stamp line) |
+| liv | `time_s, cycle, direction, LEVEL, power_W` (no time stamp line) |
 | camera / flir | `time_s, index, file, utc` |
+
+`LEVEL` is `current_A` for the DC2200 (the same as before) and `intensity_pct` for the pE-300. LineTracker's `analysis report` expects `current_A`, so for a pE-300 ramp you have to adapt it.
 
 Numbering of `<name>_XXXX` continues after the files already in the folder, so nothing is overwritten.
 
@@ -250,6 +312,15 @@ Numbering of `<name>_XXXX` continues after the files already in the folder, so n
    `equipment devices` shows the connected serials and the configured resources.
 2. The modules detach the Linux kernel driver while they run and re-attach it afterwards. This needs `pyusb` and USB permissions: a udev rule for vendor `1313`, or `sudo`.
 3. The DC2200 needs the `measurement_control` package. The PM400 is driven directly over SCPI with `pyvisa-py`.
+
+### CoolLED pE-300
+
+1. Install pyserial with `pip install -e ".[coolled]"`. The pE-300 is a USB virtual serial port (57600 baud):
+   - Linux: `/dev/ttyACM*`. Your user must be in the `dialout` group (`sudo usermod -aG dialout $USER`, then log in again).
+   - Windows: a `COM` port. Windows needs `CoolLEDpE.inf` from coolled.com.
+2. The port is found automatically when it identifies as CoolLED. Otherwise every USB serial port is asked `CSS?`. Fix it with `--port` or `EQUIPMENT_PE300_PORT=/dev/ttyACM0` if other serial devices are connected.
+3. Check with `equipment pe300 status`.
+4. Don't use the Control Pod during a run. Every setting is verified, so a change from the pod stops the run with an error.
 
 ### Canon EOS R10
 
@@ -286,26 +357,47 @@ With either library:
 ## Python API
 
 ```python
-from equipment import main_ramp, main_set_current, main_power_measurement
-from equipment import main_photo, main_flir_timelapse, main_ramp_camera
+from equipment import main_ramp, main_source_ramp, main_paired_ramp, main_pe300_set
 
-rows = main_ramp({"i_min": 0, "i_max": 0.5, "step": 0.05, "step_time": 2,
+rows = main_ramp({"i_min": 0, "i_max": 0.5, "step": 0.05, "step_time": 2,      # DC2200
                   "output_csv": "output/ramp/run1.csv"})
 
-main_ramp_camera({"i_min": 0.05, "i_max": 1, "step": 0.05, "step_time": 100,
-                  "camera": "mysample", "camera_type": "flir",
-                  "shutter": "1/250", "gain": 0, "whitebalance": "off",
-                  "output_csv": "output/ramp/run2.csv"})
+main_pe300_set({"intensity": 30, "channels": "ABC"})                           # stays on
+
+rows = main_source_ramp({"source": "pe300", "channels": "B", "min": 0, "max": 100,
+                         "step": 10, "step_time": 2})
+
+# any source + any measurements: pE-300 + FLIR + PM400
+out = main_paired_ramp({"source": "pe300", "min": 0, "max": 100, "step": 10,
+                        "step_time": 10,
+                        "camera": "mysample", "camera_type": "flir",
+                        "shutter": "1/250", "gain": 0, "whitebalance": "off",
+                        "power": True, "wavelength": 470,
+                        "output_csv": "output/ramp/run2.csv"})
+# out = {"rows": ramp rows, "photos": [files], "power": [power rows]}
 ```
 
-Every `main_*` function takes a dict, or an object with the same attributes. The lower-level classes are `CanonCamera`, `FlirCamera`, `PM400` and `ThorlabsUSBDriver`. Names are imported lazily, so `import equipment` loads no hardware library. The scripts in `examples/` show every instrument.
+Light sources can also be used directly. Each one is a context manager, and the light is switched off when you leave the block:
+
+```python
+from equipment import make_source, run_ramp
+
+with make_source("pe300", {"channels": "AC"}) as light:      # or "dc2200"
+    light.set_level(20)
+    light.switch_on()
+    ...
+```
+
+Every `main_*` function takes a dict, or an object with the same attributes. The lower-level classes are `PE300`, `CanonCamera`, `FlirCamera`, `PM400` and `ThorlabsUSBDriver`.
+
+**Adding another light source.** Subclass `LightSource` in `sources.py` and set `key`, `name`, `unit`, `column` and `max_level`. Implement `open`, `close`, `set_level`, `switch_on` and `switch_off`, plus `from_cfg`. Then add the class to `SOURCES`. The ramp, the pairings and LIV then work with it. In the CLI, add a `SOURCE_INFO` entry and call `add_ramp_command`. Names are imported lazily, so `import equipment` loads no hardware library. The scripts in `examples/` show every instrument.
 
 ## Project structure
 
 ```text
 equipment/
-├── pyproject.toml                    extras: thorlabs, canon, flir, all, test
-├── examples/                         01_dc2200_ramp ... 06_ramp_with_photos
+├── pyproject.toml                    extras: thorlabs, coolled, canon, flir, all, test
+├── examples/                         01_dc2200_ramp ... 07_pe300, 08_pairings
 ├── tests/                            parser, logic, and full runs with fake instruments
 └── src/equipment/
     ├── __init__.py                   lazy public API
@@ -314,12 +406,16 @@ equipment/
     ├── devices.py                    `equipment devices`
     ├── utils.py                      UTC time stamps, CSV writing, output paths, value matching
     ├── capture.py                    shared by both cameras: file numbering, capture log
+    ├── sources.py                    LightSource interface + registry (dc2200, pe300)
+    ├── ramp.py                       stepped ramp of any light source
     ├── thorlabs/
-    │   ├── common.py                 USB IDs, serial numbers / VISA resources, timing helpers
+    │   ├── common.py                 USB IDs, serial numbers / VISA resources
     │   ├── usb_driver.py             kernel-driver detach (pyusb)
-    │   ├── dc2200.py                 constant current and stepped ramp
-    │   ├── pm400.py                  PM400 SCPI driver and power logging
-    │   └── liv.py                    DC2200 + PM400 LIV measurement
+    │   ├── dc2200.py                 DC2200Source, constant current, ramp
+    │   ├── pm400.py                  PM400 SCPI driver, open_pm400, power logging
+    │   └── liv.py                    (old import path of experiments/liv.py)
+    ├── coolled/
+    │   └── pe300.py                  PE300 serial driver, PE300Source, set/off/status
     ├── canon/
     │   ├── camera.py                 CanonCamera (gphoto2)
     │   └── capture.py                photo, time-lapse, video
@@ -328,7 +424,9 @@ equipment/
     │   ├── camera.py                 FlirCamera: settings, triggered photos, EXIF time
     │   └── capture.py                photo, time-lapse, video
     └── experiments/
-        └── ramp_camera.py            DC2200 ramp with photos (Canon or FLIR)
+        ├── paired_ramp.py            any source + photos (Canon/FLIR) and/or power (PM400)
+        ├── liv.py                    any source + PM400, linear ramp
+        └── ramp_camera.py            (old API: ramp with photos)
 ```
 
 ## Tests
@@ -338,4 +436,4 @@ pip install -e ".[test]"
 pytest
 ```
 
-The tests need no instrument. They check the command parser and the ramp, numbering and parsing logic. They also run the ramp, the ramp with photos and a Canon time-lapse end to end through the CLI, with fake instruments.
+The tests need no instrument. They check the command parser and the ramp, numbering and parsing logic. They also run the ramps, the pairings (pE-300 with PM400, with FLIR, with both, and DC2200 with Canon) and LIV end to end through the CLI. These runs use fake instruments, including a pE-300 emulator that follows CoolLED's protocol. They also check that the light goes off when anything fails.

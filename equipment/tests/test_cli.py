@@ -28,13 +28,14 @@ def run(calls, *argv):
 def test_help_works_without_hardware_libraries():
     out = subprocess.run([sys.executable, "-m", "equipment", "--help"],
                          capture_output=True, text=True, check=True).stdout
-    for device in ("devices", "dc2200", "pm400", "liv", "canon", "flir"):
+    for device in ("devices", "dc2200", "pe300", "pm400", "liv", "canon", "flir"):
         assert device in out
 
 
 def test_importing_the_cli_loads_no_hardware_library():
     code = ("import sys, equipment.cli; "
-            "bad = {'cv2', 'numpy', 'gphoto2', 'usb', 'pyvisa', 'PySpin'} & set(sys.modules); "
+            "bad = {'cv2', 'numpy', 'gphoto2', 'usb', 'pyvisa', 'PySpin', 'serial'} "
+            "& set(sys.modules); "
             "print(', '.join(sorted(bad)))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                          check=True).stdout.strip()
@@ -42,7 +43,8 @@ def test_importing_the_cli_loads_no_hardware_library():
 
 
 @pytest.mark.parametrize("argv", [
-    ["dc2200", "-h"], ["dc2200", "ramp", "-h"], ["pm400", "measure", "-h"], ["liv", "-h"],
+    ["dc2200", "-h"], ["dc2200", "ramp", "-h"], ["pe300", "-h"], ["pe300", "ramp", "-h"],
+    ["pe300", "set", "-h"], ["pm400", "measure", "-h"], ["liv", "-h"],
     ["canon", "timelapse", "-h"], ["flir", "video", "-h"]])
 def test_every_help_page(argv, capsys):
     with pytest.raises(SystemExit) as e:
@@ -84,8 +86,9 @@ def test_dc2200_ramp(calls, tmp_path):
     target, cfg = run(calls, "dc2200", "ramp", "--min", "0", "--max", "0.5", "--step",
                       "0.05", "--step-time", "2", "--cycles", "3",
                       "--output-dir", str(tmp_path), "--output-csv", "run1.csv")
-    assert target == "thorlabs.dc2200:main_ramp"
-    assert cfg["i_min"] == 0 and cfg["i_max"] == 0.5 and cfg["step"] == 0.05
+    assert target == "ramp:main_source_ramp"
+    assert cfg["source"] == "dc2200"
+    assert cfg["min"] == 0 and cfg["max"] == 0.5 and cfg["step"] == 0.05
     assert cfg["step_time"] == 2 and cfg["cycles"] == 3
     assert Path(cfg["output_csv"]) == tmp_path / "ramp" / "run1.csv"
 
@@ -109,8 +112,9 @@ def test_ramp_with_canon_photos(calls):
                       "0.05", "--step-time", "100", "--photos", "mysample",
                       "--shutter", "1/250", "--iso", "100", "--wb", "Daylight",
                       "--sync-clock", "--photo-delay", "10")
-    assert target == "experiments.ramp_camera:main_ramp_camera"
+    assert target == "experiments.paired_ramp:main_paired_ramp"
     assert cfg["camera"] == "mysample" and cfg["camera_type"] == "canon"
+    assert "power" not in cfg
     assert cfg["shutter"] == "1/250" and cfg["iso"] == "100"
     assert cfg["whitebalance"] == "Daylight" and cfg["sync_clock"] is True
     assert cfg["photo_delay"] == 10 and cfg["photo_interval"] is None
@@ -159,7 +163,8 @@ def test_pm400_old_option_names(calls):
 def test_liv(calls):
     target, cfg = run(calls, "liv", "--i-max", "0.05", "--ramp-duration", "10",
                       "--output-csv", "liv_run1.csv")
-    assert target == "thorlabs.liv:main_liv_measurement"
+    assert target == "experiments.liv:main_liv_measurement"
+    assert cfg["source"] == "dc2200"
     assert cfg["i_min"] == 0 and cfg["i_max"] == 0.05
     assert Path(cfg["output_csv"]) == Path("output/liv/liv_run1.csv")
 
@@ -235,3 +240,76 @@ def test_ctrl_c_message(monkeypatch):
         cli.main(["dc2200", "ramp", "--min", "0", "--max", "0.1", "--step", "0.1",
                   "--step-time", "1"])
     assert "switched off" in e.value.code
+
+
+# -- pE-300 ------------------------------------------------------------------
+def test_pe300_set(calls):
+    target, cfg = run(calls, "pe300", "set", "40", "--channels", "c,a", "--port", "/dev/x")
+    assert target == "coolled.pe300:main_pe300_set"
+    assert cfg == {"intensity": 40, "channels": "AC", "port": "/dev/x"}
+
+
+@pytest.mark.parametrize("argv,target", [
+    (["pe300", "off"], "coolled.pe300:main_pe300_off"),
+    (["pe", "status"], "coolled.pe300:main_pe300_status")])
+def test_pe300_off_status(calls, argv, target):
+    assert run(calls, *argv)[0] == target
+
+
+def test_pe300_ramp(calls):
+    target, cfg = run(calls, "pe300", "ramp", "--min", "0", "--max", "100", "--step", "10",
+                      "--step-time", "2", "--channels", "B")
+    assert target == "ramp:main_source_ramp"
+    assert cfg["source"] == "pe300" and cfg["max"] == 100 and cfg["channels"] == "B"
+    assert "dc2200_serial" not in cfg
+
+
+@pytest.mark.parametrize("argv", [
+    ["pe300", "set", "101"],
+    ["pe300", "set", "50", "--channels", "D"],
+    ["pe300", "ramp", "--min", "0", "--max", "120", "--step", "10", "--step-time", "1"],
+    ["pe300", "ramp", "--min", "0", "--max", "50", "--step", "0.5", "--step-time", "1"],
+    ["pe300", "ramp", "--min", "0", "--max", "50", "--step", "5", "--step-time", "1",
+     "--dc2200-serial", "x"],
+    ["pe300", "ramp", "--min", "0", "--max", "50", "--step", "5", "--step-time", "1",
+     "--wavelength", "470"],                                   # PM400 option without --power
+    ["pe300", "ramp", "--min", "0", "--max", "50", "--step", "5", "--step-time", "1",
+     "--power", "--power-delay", "1"],                          # not shorter than the step
+    ["liv", "--source", "pe300", "--max", "120"],
+    ["liv", "--source", "dc2200", "--channels", "A"],
+    ["liv", "--source", "pe300", "--dc2200-serial", "x"],
+])
+def test_pe300_invalid(calls, argv):
+    with pytest.raises(SystemExit) as e:
+        cli.main(argv)
+    assert e.value.code == 2 and calls == []
+
+
+# -- pairing -----------------------------------------------------------------
+def test_pe300_with_pm400(calls):
+    target, cfg = run(calls, "pe300", "ramp", "--min", "0", "--max", "100", "--step", "10",
+                      "--step-time", "5", "--power", "--wavelength", "470",
+                      "--power-interval", "1")
+    assert target == "experiments.paired_ramp:main_paired_ramp"
+    assert cfg["power"] is True and cfg["wavelength"] == 470 and cfg["power_interval"] == 1
+    assert "camera" not in cfg
+
+
+def test_pe300_with_flir_and_pm400(calls):
+    _, cfg = run(calls, "pe300", "ramp", "--min", "0", "--max", "100", "--step", "10",
+                 "--step-time", "5", "--photos", "s1", "--camera", "flir", "--gain", "0",
+                 "--power")
+    assert cfg["camera"] == "s1" and cfg["camera_type"] == "flir" and cfg["gain"] == "0"
+    assert cfg["power"] is True and cfg["source"] == "pe300"
+
+
+def test_dc2200_with_pm400(calls):
+    _, cfg = run(calls, "dc2200", "ramp", "--min", "0", "--max", "1", "--step", "0.1",
+                 "--step-time", "5", "--power", "--pm400-serial", "P9")
+    assert cfg["source"] == "dc2200" and cfg["power"] and cfg["pm400_serial"] == "P9"
+
+
+def test_liv_with_pe300(calls):
+    target, cfg = run(calls, "liv", "--source", "pe300", "--channels", "ab")
+    assert target == "experiments.liv:main_liv_measurement"
+    assert cfg["source"] == "pe300" and cfg["i_max"] == 100 and cfg["channels"] == "AB"

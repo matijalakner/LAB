@@ -4,6 +4,7 @@ The `measurement_control` package has no power meter driver, so the meter is
 talked to here. The `PM400` class is also used by PM400_DC2200.py.
 """
 import time
+from contextlib import contextmanager
 
 from ..utils import utc_timestamp, write_csv
 from .common import PM_PRODUCT_ID, PM_RESOURCE, close_quietly, pm_resource, sleep_until
@@ -55,6 +56,24 @@ class PM400:
         return False
 
 
+@contextmanager
+def open_pm400(serial=None, wavelength=None, averaging_count=None, verbose=True):
+    """Detach the kernel driver, connect and configure the PM400; yields the meter."""
+    with ThorlabsUSBDriver(product_id=PM_PRODUCT_ID):
+        with PM400(pm_resource(serial)) as meter:
+            if verbose:
+                print("PM400 connected:", meter.idn())
+            if wavelength is not None:
+                if wavelength <= 0:
+                    raise ValueError("wavelength must be > 0 nm")
+                meter.set_wavelength(wavelength)
+            if averaging_count is not None:
+                if int(averaging_count) < 1:
+                    raise ValueError("averaging_count must be >= 1")
+                meter.set_averaging(averaging_count)
+            yield meter
+
+
 def _read_cfg(cfg):
     """Accepts a dict or an object (e.g. SimpleNamespace) with the power meter settings."""
     get = cfg.get if isinstance(cfg, dict) else (lambda k: getattr(cfg, k))
@@ -99,22 +118,17 @@ def main_power_measurement(cfg):
 
     readings, time_stamp = [], None
     try:
-        with ThorlabsUSBDriver(product_id=PM_PRODUCT_ID):
-            with PM400(pm_resource(p["pm400_serial"])) as meter:
-                print("Connected to:", meter.idn())
-                meter.set_wavelength(p["wavelength"])
-                meter.set_averaging(p["averaging_count"])
-                print(f"Starting power logging at {p['wavelength']} nm...")
-
-                total = max(1, int(round(p["sample_duration"] * p["sample_rate"])))
-                dt = 1.0 / p["sample_rate"]
-                time_stamp = utc_timestamp()
-                t0 = time.monotonic()
-                for i in range(total):
-                    sleep_until(t0 + i * dt)
-                    power = meter.read_power()
-                    readings.append((round(time.monotonic() - t0, 4), power))
-                    print(f"Sample {i + 1}/{total} - Power: {power * 1e3:.4f} mW")
+        with open_pm400(p["pm400_serial"], p["wavelength"], p["averaging_count"]) as meter:
+            print(f"Starting power logging at {p['wavelength']} nm...")
+            total = max(1, int(round(p["sample_duration"] * p["sample_rate"])))
+            dt = 1.0 / p["sample_rate"]
+            time_stamp = utc_timestamp()
+            t0 = time.monotonic()
+            for i in range(total):
+                sleep_until(t0 + i * dt)
+                power = meter.read_power()
+                readings.append((round(time.monotonic() - t0, 4), power))
+                print(f"Sample {i + 1}/{total} - Power: {power * 1e3:.4f} mW")
     finally:
         if p["output_csv"] and readings:
             write_csv(p["output_csv"], PM_CSV_HEADER, readings, time_stamp)

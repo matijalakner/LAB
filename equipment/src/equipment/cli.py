@@ -1,13 +1,16 @@
 """Terminal control of the lab equipment.
 
     equipment devices                                  what is connected
-    equipment dc2200 {set, off, ramp}                  Thorlabs DC2200 LED driver
-    equipment dc2200 ramp ... --photos NAME            ramp with photos (Canon or FLIR)
+    equipment dc2200 {set, off, ramp}                  Thorlabs DC2200 LED driver (A)
+    equipment pe300  {set, off, status, ramp}          CoolLED pE-300 (%)
     equipment pm400  measure                           Thorlabs PM400 power meter
-    equipment liv                                      DC2200 ramp + PM400 power log
+    equipment liv    --source {dc2200, pe300}          light ramp + PM400 power log
     equipment canon  {info, photo, timelapse, video}   Canon EOS R10
     equipment flir   {list, info, photo, timelapse, video}
                                                        FLIR Blackfly S
+
+Pairing: every light source's ramp can be combined with any measurement:
+    equipment <dc2200|pe300> ramp ... [--photos NAME [--camera canon|flir]] [--power]
 
 Data:   <output-dir>/<ramp|pm|liv|camera>/<kind>_<UTC time>.csv   (default output/)
 Files:  <input-dir>/folder/<name>/<name>_XXXX.jpg                 (default input/)
@@ -71,7 +74,8 @@ def _subparsers(parser, dest, title="commands"):
 
 
 def _cmd(subparsers, name, help_text, **kwargs):
-    return subparsers.add_parser(name, help=help_text, description=help_text,
+    return subparsers.add_parser(name, help=help_text,
+                                 description=help_text.replace("%%", "%"),
                                  formatter_class=argparse.RawDescriptionHelpFormatter,
                                  **kwargs)
 
@@ -166,6 +170,115 @@ def add_flir_settings(parser, shared=True):
     return g
 
 
+def add_pe300_options(parser, channels=True):
+    g = parser.add_argument_group("pE-300")
+    if channels:
+        g.add_argument("--channels", default=None, metavar="ABC",
+                       help="channels to light, any of A B C, e.g. ABC (white, default), "
+                            "B or AC; the others are switched off")
+    g.add_argument("--port", default=None,
+                   help="serial port, e.g. /dev/ttyACM0 or COM3 (default: "
+                        "$EQUIPMENT_PE300_PORT, else found automatically)")
+    return g
+
+
+SOURCE_INFO = {
+    # key: (name, unit metavar, max level, level word, examples)
+    "dc2200": ("DC2200", "A", 2.0, "current",
+               ["equipment dc2200 ramp --min 0 --max 0.5 --step 0.05 --step-time 2",
+                "equipment dc2200 ramp --min 0.05 --max 1 --step 0.05 --step-time 100 \\\n"
+                "      --photos mysample --shutter 1/250 --iso 100 --wb Daylight",
+                "equipment dc2200 ramp --min 0 --max 1 --step 0.1 --step-time 10 \\\n"
+                "      --photos mysample --camera flir --gain 0 --wb off --power"]),
+    "pe300": ("pE-300", "PCT", 100, "intensity",
+              ["equipment pe300 ramp --min 0 --max 100 --step 10 --step-time 2",
+               "equipment pe300 ramp --min 0 --max 100 --step 5 --step-time 10 \\\n"
+               "      --photos mysample --camera flir --shutter 1/250 --gain 0 --wb off",
+               "equipment pe300 ramp --min 0 --max 100 --step 10 --step-time 5 --power "
+               "--wavelength 470",
+               "equipment pe300 ramp --min 0 --max 50 --step 5 --step-time 60 --channels B "
+               "\\\n      --photos s1 --power"]),
+}
+
+
+def add_power_options(parser):
+    g = parser.add_argument_group("power readings during the ramp (optional, PM400)")
+    g.add_argument("--power", action="store_true",
+                   help="read the optical power with the PM400; log: <ramp>_power.csv")
+    timing = g.add_mutually_exclusive_group()
+    timing.add_argument("--power-delay", type=_non_negative_float, default=None, metavar="S",
+                        help="one reading per step, S seconds after it starts "
+                             "(default: half the step time)")
+    timing.add_argument("--power-interval", type=_positive_float, default=None, metavar="S",
+                        help="instead: a reading every S seconds from the ramp start")
+    g.add_argument("--wavelength", type=_positive_float, default=None, metavar="NM",
+                   help="PM400 wavelength in nm (default: 450)")
+    g.add_argument("--averaging-count", type=_positive_int, default=None, metavar="N",
+                   help="PM400 averaging (default: 10)")
+    add_pm400_serial(g)
+    return g
+
+
+def add_photo_options(parser):
+    ph = parser.add_argument_group("photos during the ramp (optional, Canon or FLIR)")
+    ph.add_argument("--photos", metavar="NAME", default=None,
+                    help="take photos, saved as <input-dir>/folder/NAME/NAME_XXXX.jpg; "
+                         "log: <ramp>_photos.csv")
+    ph.add_argument("--camera", choices=("canon", "flir"), default="canon",
+                    help="which camera (default: canon)")
+    timing = ph.add_mutually_exclusive_group()
+    timing.add_argument("--photo-delay", type=_non_negative_float, default=None, metavar="S",
+                        help="one photo per step, S seconds after it starts "
+                             "(default: half the step time)")
+    timing.add_argument("--photo-interval", type=_positive_float, default=None, metavar="S",
+                        help="instead: a photo every S seconds from the ramp start")
+    ph.add_argument("--input-dir", default="input", metavar="DIR",
+                    help="root folder for the photos (default: input)")
+    ph.add_argument("--keep-on-card", action="store_true",
+                    help="Canon: also keep the photos on the memory card")
+    ph.add_argument("--shutter", "--exposure", dest="shutter", default=None,
+                    help="shutter / exposure time, e.g. 1/250")
+    ph.add_argument("--wb", dest="whitebalance", default=None,
+                    help="white balance (Canon: Daylight, Auto, ...; FLIR: off, once, auto)")
+    add_canon_settings(parser, shared=False)
+    add_flir_settings(parser, shared=False)
+
+
+def add_ramp_command(subparsers, key):
+    """`<source> ramp`: the same stepped ramp and pairing options for every light source."""
+    name, metavar, max_level, word, examples = SOURCE_INFO[key]
+    unit = "A" if metavar == "A" else "%%"          # escaped for argparse help
+    rp = _cmd(subparsers, "ramp",
+              f"Step the {name} {word} min -> max -> min, holding every step for "
+              "--step-time seconds. The light is switched off at the end, on any error "
+              "and on Ctrl+C.\n"
+              "Pair it with photos (--photos NAME, Canon or FLIR) and/or power readings "
+              "(--power, PM400): each measures in its own thread, by default once in "
+              "the middle of every step.",
+              epilog="examples:\n  " + "\n  ".join(examples))
+    g = rp.add_argument_group("ramp")
+    g.add_argument("--min", dest="i_min", type=_non_negative_float, required=True,
+                   metavar=metavar, help=f"{word} to start from ({unit})")
+    g.add_argument("--max", dest="i_max", type=_non_negative_float, required=True,
+                   metavar=metavar, help=f"{word} to step up to (at most {max_level:g} {unit})")
+    g.add_argument("--step", type=_positive_float, required=True, metavar=metavar,
+                   help=f"{word} change per step ({unit})"
+                        + (", whole percent" if key == "pe300" else ""))
+    g.add_argument("--step-time", type=_positive_float, required=True, metavar="S",
+                   help="how long every step is held")
+    g.add_argument("--cycles", type=_positive_int, default=1,
+                   help="min -> max -> min cycles (default: 1)")
+    if key == "dc2200":
+        add_dc2200_serial(g)
+    else:
+        add_pe300_options(rp)
+    add_output_options(rp, "ramp")
+    add_photo_options(rp)
+    add_power_options(rp)
+    return rp
+
+
+
 def add_run_length(parser, what="photo"):
     parser.add_argument("-n", "--interval", type=_positive_float, required=True,
                         metavar="S", help=f"seconds between {what}s (first one at t = 0)")
@@ -186,7 +299,9 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog="equipment",
         description="Control the lab equipment from the terminal: Thorlabs DC2200 LED "
-                    "driver and PM400 power meter, Canon EOS R10 and FLIR Blackfly S.",
+                    "driver and PM400 power meter, CoolLED pE-300, Canon EOS R10 and "
+                    "FLIR Blackfly S. Light-source ramps can be paired with photos "
+                    "and/or power readings.",
         epilog="Run 'equipment <device> -h' for the commands of a device.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--debug", action="store_true",
@@ -194,7 +309,8 @@ def build_parser():
     devices = _subparsers(parser, "device", "instruments")
 
     # -- devices -------------------------------------------------------------
-    _cmd(devices, "devices", "List the connected instruments (Thorlabs USB, Canon, FLIR).")
+    _cmd(devices, "devices", "List the connected instruments (Thorlabs USB, pE-300, Canon, "
+                             "FLIR).")
 
     # -- DC2200 --------------------------------------------------------------
     dc = _cmd(devices, "dc2200", "Thorlabs DC2200 LED driver. " + CURRENT_WARNING)
@@ -208,53 +324,23 @@ def build_parser():
     off = _cmd(dcc, "off", "Switch the LED output off.")
     add_dc2200_serial(off)
 
-    rp = _cmd(dcc, "ramp",
-              "Step the current min -> max -> min, holding every step for --step-time "
-              "seconds. The LED is switched off at the end, on any error and on Ctrl+C.\n"
-              "With --photos NAME a camera takes photos during the ramp.",
-              epilog="examples:\n"
-                     "  equipment dc2200 ramp --min 0 --max 0.5 --step 0.05 --step-time 2\n"
-                     "  equipment dc2200 ramp --min 0.05 --max 1 --step 0.05 --step-time 100 "
-                     "\\\n      --photos mysample --shutter 1/250 --iso 100 --wb Daylight "
-                     "--sync-clock\n"
-                     "  equipment dc2200 ramp --min 0.05 --max 1 --step 0.05 --step-time 100 "
-                     "\\\n      --photos mysample --camera flir --shutter 1/250 --gain 0 "
-                     "--wb off")
-    g = rp.add_argument_group("ramp")
-    g.add_argument("--min", dest="i_min", type=_non_negative_float, required=True,
-                   metavar="A", help="current to start from")
-    g.add_argument("--max", dest="i_max", type=_non_negative_float, required=True,
-                   metavar="A", help="current to step up to (at most 2 A)")
-    g.add_argument("--step", type=_positive_float, required=True, metavar="A",
-                   help="current change per step")
-    g.add_argument("--step-time", type=_positive_float, required=True, metavar="S",
-                   help="how long every step is held")
-    g.add_argument("--cycles", type=_positive_int, default=1,
-                   help="min -> max -> min cycles (default: 1)")
-    add_dc2200_serial(g)
-    add_output_options(rp, "ramp")
-    ph = rp.add_argument_group("photos during the ramp (optional)")
-    ph.add_argument("--photos", metavar="NAME", default=None,
-                    help="take photos, saved as <input-dir>/folder/NAME/NAME_XXXX.jpg; a "
-                         "photo log goes next to the ramp CSV (<ramp>_photos.csv)")
-    ph.add_argument("--camera", choices=("canon", "flir"), default="canon",
-                    help="which camera (default: canon)")
-    timing = ph.add_mutually_exclusive_group()
-    timing.add_argument("--photo-delay", type=_non_negative_float, default=None, metavar="S",
-                        help="one photo per step, S seconds after it starts "
-                             "(default: half the step time)")
-    timing.add_argument("--photo-interval", type=_positive_float, default=None, metavar="S",
-                        help="instead: a photo every S seconds from the ramp start")
-    ph.add_argument("--input-dir", default="input", metavar="DIR",
-                    help="root folder for the photos (default: input)")
-    ph.add_argument("--keep-on-card", action="store_true",
-                    help="Canon: also keep the photos on the memory card")
-    ph.add_argument("--shutter", "--exposure", dest="shutter", default=None,
-                    help="shutter / exposure time, e.g. 1/250")
-    ph.add_argument("--wb", dest="whitebalance", default=None,
-                    help="white balance (Canon: Daylight, Auto, ...; FLIR: off, once, auto)")
-    add_canon_settings(rp, shared=False)
-    add_flir_settings(rp, shared=False)
+    add_ramp_command(dcc, "dc2200")
+
+    # -- pE-300 --------------------------------------------------------------
+    pe = _cmd(devices, "pe300", "CoolLED pE-300 LED illumination (USB serial). Levels are "
+                                "intensities in %% (0 - 100) of the chosen channels.",
+              aliases=["pe"])
+    pec = _subparsers(pe, "action")
+    ps = _cmd(pec, "set", "Set the intensity of the channels and LEAVE THE LIGHT ON "
+                          "(0 = off). Other channels are switched off.")
+    ps.add_argument("intensity", type=_non_negative_float, help="intensity in %% (0 - 100)")
+    add_pe300_options(ps)
+    po = _cmd(pec, "off", "Switch all channels off.")
+    add_pe300_options(po, channels=False)
+    pst = _cmd(pec, "status", "Show port, firmware, wavelengths and the state of every "
+                              "channel.")
+    add_pe300_options(pst, channels=False)
+    add_ramp_command(pec, "pe300")
 
     # -- PM400 ---------------------------------------------------------------
     pm = _cmd(devices, "pm400", "Thorlabs PM400 power meter.", aliases=["pm"])
@@ -273,12 +359,16 @@ def build_parser():
     add_output_options(ms, "pm")
 
     # -- LIV -----------------------------------------------------------------
-    liv = _cmd(devices, "liv", "Ramp the DC2200 linearly and log the PM400 power at every "
-                               "point (light-current curve). " + CURRENT_WARNING)
+    liv = _cmd(devices, "liv", "Ramp a light source linearly and log the PM400 power at "
+                               "every point (light-power curve). DC2200 levels in A, "
+                               "pE-300 levels in %%.")
+    liv.add_argument("--source", choices=("dc2200", "pe300"), default="dc2200",
+                     help="light source (default: dc2200)")
     liv.add_argument("--min", "--i-min", dest="i_min", type=_non_negative_float,
-                     default=0.0, metavar="A", help="start current (default: 0)")
+                     default=None, metavar="LEVEL", help="start level (default: 0)")
     liv.add_argument("--max", "--i-max", dest="i_max", type=_non_negative_float,
-                     default=0.05, metavar="A", help="top current (default: 0.05)")
+                     default=None, metavar="LEVEL",
+                     help="top level (default: 0.05 A for the DC2200, 100 %% for the pE-300)")
     liv.add_argument("--ramp-duration", type=_positive_float, default=10.0, metavar="S",
                      help="time for one ramp up (and again down) (default: 10)")
     liv.add_argument("--update-rate", type=_positive_float, default=10.0, metavar="HZ",
@@ -293,6 +383,7 @@ def build_parser():
                           "shorter than 1 / update-rate)")
     add_dc2200_serial(liv)
     add_pm400_serial(liv)
+    add_pe300_options(liv)
     add_output_options(liv, "liv")
 
     # -- Canon ---------------------------------------------------------------
@@ -377,6 +468,81 @@ def _csv(args, kind, prefix=None):
     return output_csv_path(args.output_dir, kind, name)
 
 
+PHOTO_KEYS = ("photo_delay", "photo_interval", "keep_on_card")
+POWER_KEYS = ("power_delay", "power_interval", "wavelength", "averaging_count",
+              "pm400_serial")
+
+
+def _given(args, keys):
+    return [k for k in keys if getattr(args, k, None) not in (None, False)]
+
+
+def _flag(key):
+    return "--" + key.replace("_", "-")
+
+
+def run_ramp(args, parser, key):
+    name, _, max_level, word, _ = SOURCE_INFO[key]
+    if args.i_max > max_level:
+        parser.error(f"--max must be <= {max_level:g} for the {name}")
+    if args.i_max < args.i_min:
+        parser.error("--max must be >= --min")
+    if key == "pe300" and args.step < 1:
+        parser.error("--step must be at least 1 % (the pE-300 sets whole percent)")
+    cfg = {"source": key, "min": args.i_min, "max": args.i_max, "step": args.step,
+           "step_time": args.step_time, "cycles": args.cycles,
+           "output_csv": _csv(args, "ramp")}
+    if key == "dc2200":
+        cfg["dc2200_serial"] = args.dc2200_serial
+    else:
+        cfg.update(port=args.port, channels=_channels(args, parser))
+
+    # photos
+    camera_opts = set(CANON_SETTINGS + FLIR_SETTINGS + FLIR_ONLY + CANON_ONLY + PHOTO_KEYS)
+    if args.photos is None:
+        given = _given(args, sorted(camera_opts))
+        if given:
+            parser.error("camera options (" + ", ".join(map(_flag, given))
+                         + ") need --photos NAME")
+    else:
+        other = FLIR_ONLY if args.camera == "canon" else CANON_ONLY
+        wrong = _given(args, other)
+        if wrong:
+            parser.error(f"--camera {args.camera} does not use: " + ", ".join(map(_flag, wrong)))
+        if args.photo_delay is not None and args.photo_delay >= args.step_time:
+            parser.error("--photo-delay must be shorter than --step-time")
+        keys = CANON_SETTINGS + CANON_ONLY if args.camera == "canon" else \
+            FLIR_SETTINGS + FLIR_ONLY
+        cfg.update(_pick(args, keys))
+        cfg.update(camera=args.photos, camera_type=args.camera, input_dir=args.input_dir,
+                   photo_delay=args.photo_delay, photo_interval=args.photo_interval)
+
+    # power
+    if not args.power:
+        given = _given(args, POWER_KEYS)
+        if given:
+            parser.error("PM400 options (" + ", ".join(map(_flag, given)) + ") need --power")
+    else:
+        if args.power_delay is not None and args.power_delay >= args.step_time:
+            parser.error("--power-delay must be shorter than --step-time")
+        cfg.update(power=True, **_pick(args, POWER_KEYS))
+
+    if args.photos is None and not args.power:
+        _call("ramp:main_source_ramp", cfg)
+    else:
+        _call("experiments.paired_ramp:main_paired_ramp", cfg)
+    print("Ramp completed.")
+
+
+def _channels(args, parser):
+    if getattr(args, "channels", None) is None:
+        return None
+    text = args.channels.upper().replace(",", "").replace(" ", "")
+    if not text or any(c not in "ABC" for c in text):
+        parser.error("--channels must be letters from A, B, C, e.g. ABC or B")
+    return "".join(c for c in "ABC" if c in text)
+
+
 def run_dc2200(args, parser):
     if args.action == "set":
         if args.current > 2.0:
@@ -386,39 +552,21 @@ def run_dc2200(args, parser):
     if args.action == "off":
         return _call("thorlabs.dc2200:main_set_current",
                      {"current": 0.0, "dc2200_serial": args.dc2200_serial})
+    return run_ramp(args, parser, "dc2200")
 
-    # ramp
-    if args.i_max > 2.0:
-        parser.error("--max must be <= 2 A")
-    if args.i_max < args.i_min:
-        parser.error("--max must be >= --min")
-    cfg = {"i_min": args.i_min, "i_max": args.i_max, "step": args.step,
-           "step_time": args.step_time, "cycles": args.cycles,
-           "dc2200_serial": args.dc2200_serial,
-           "output_csv": _csv(args, "ramp")}
-    if args.photos is None:
-        camera_given = [k for k in set(CANON_SETTINGS + FLIR_SETTINGS + FLIR_ONLY
-                                       + CANON_ONLY) | {"photo_delay", "photo_interval"}
-                        if getattr(args, k, None) not in (None, False)]
-        if camera_given:
-            parser.error("camera options (" + ", ".join(sorted(camera_given))
-                         + ") need --photos NAME")
-        _call("thorlabs.dc2200:main_ramp", cfg)
-    else:
-        other = FLIR_ONLY if args.camera == "canon" else CANON_ONLY
-        wrong = [k for k in other if getattr(args, k, None) not in (None, False)]
-        if wrong:
-            parser.error(f"--camera {args.camera} does not use: "
-                         + ", ".join("--" + k.replace("_", "-") for k in wrong))
-        if args.photo_delay is not None and args.photo_delay >= args.step_time:
-            parser.error("--photo-delay must be shorter than --step-time")
-        keys = CANON_SETTINGS + CANON_ONLY if args.camera == "canon" else \
-            FLIR_SETTINGS + FLIR_ONLY
-        cfg.update(_pick(args, keys))
-        cfg.update(camera=args.photos, camera_type=args.camera, input_dir=args.input_dir,
-                   photo_delay=args.photo_delay, photo_interval=args.photo_interval)
-        _call("experiments.ramp_camera:main_ramp_camera", cfg)
-    print("Ramp completed.")
+
+def run_pe300(args, parser):
+    if args.action == "set":
+        if args.intensity > 100:
+            parser.error("intensity must be <= 100 %")
+        return _call("coolled.pe300:main_pe300_set",
+                     {"intensity": args.intensity, "channels": _channels(args, parser),
+                      "port": args.port})
+    if args.action == "off":
+        return _call("coolled.pe300:main_pe300_off", {"port": args.port})
+    if args.action == "status":
+        return _call("coolled.pe300:main_pe300_status", {"port": args.port})
+    return run_ramp(args, parser, "pe300")
 
 
 def run_pm400(args, parser):
@@ -429,16 +577,24 @@ def run_pm400(args, parser):
 
 
 def run_liv(args, parser):
-    if args.i_max > 2.0:
-        parser.error("--max must be <= 2 A")
-    if args.i_max < args.i_min:
+    name, _, max_level, _, _ = SOURCE_INFO[args.source]
+    i_min = 0.0 if args.i_min is None else args.i_min
+    i_max = (0.05 if args.source == "dc2200" else 100) if args.i_max is None else args.i_max
+    if i_max > max_level:
+        parser.error(f"--max must be <= {max_level:g} for the {name}")
+    if i_max < i_min:
         parser.error("--max must be >= --min")
     if args.settle_time is not None and args.settle_time >= 1.0 / args.update_rate:
         parser.error("--settle-time must be shorter than 1 / --update-rate")
-    return _call("thorlabs.liv:main_liv_measurement", {
-        **_pick(args, ("i_min", "i_max", "ramp_duration", "update_rate", "cycles",
-                       "wavelength", "averaging_count", "settle_time", "dc2200_serial",
-                       "pm400_serial")),
+    if args.source == "dc2200" and (args.port or args.channels):
+        parser.error("--port and --channels are for --source pe300")
+    if args.source == "pe300" and args.dc2200_serial:
+        parser.error("--dc2200-serial is for --source dc2200")
+    return _call("experiments.liv:main_liv_measurement", {
+        **_pick(args, ("source", "ramp_duration", "update_rate", "cycles", "wavelength",
+                       "averaging_count", "settle_time", "dc2200_serial", "pm400_serial",
+                       "port")),
+        "i_min": i_min, "i_max": i_max, "channels": _channels(args, parser),
         "output_csv": _csv(args, "liv")})
 
 
@@ -485,14 +641,17 @@ def run_devices(args, parser):
     return _call("devices:main_devices")
 
 
-HANDLERS = {"devices": run_devices, "dc2200": run_dc2200, "pm400": run_pm400,
+HANDLERS = {"devices": run_devices, "dc2200": run_dc2200, "pe300": run_pe300,
+            "pe": run_pe300, "pm400": run_pm400,
             "pm": run_pm400, "liv": run_liv, "canon": run_canon, "flir": run_flir}
 
 
 def _interrupted_message(args):
-    if args.device in ("dc2200", "liv") and getattr(args, "action", None) != "set":
-        extra = "; photos taken so far are kept" if getattr(args, "photos", None) else ""
-        return "Interrupted; LED output was switched off" + extra + "."
+    if args.device in ("dc2200", "pe300", "pe", "liv") and \
+            getattr(args, "action", None) not in ("set", "status"):
+        extra = "; data taken so far is kept" if args.device == "liv" or \
+            getattr(args, "photos", None) or getattr(args, "power", False) else ""
+        return "Interrupted; the light was switched off" + extra + "."
     if args.device in ("canon", "flir"):
         return "Interrupted; files captured so far are kept."
     return "Interrupted."

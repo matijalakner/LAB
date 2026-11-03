@@ -6,7 +6,8 @@ import pytest
 from equipment.capture import CaptureLog, capture_folder, next_index, numbered_path
 from equipment.experiments.ramp_camera import photo_times
 from equipment.thorlabs import common
-from equipment.thorlabs.dc2200 import _read_cfg, ramp_levels, ramp_sequence
+from equipment.ramp import ramp_levels, ramp_sequence
+from equipment.thorlabs.dc2200 import _read_cfg
 from equipment.utils import match_choice, output_csv_path, read_cfg
 
 
