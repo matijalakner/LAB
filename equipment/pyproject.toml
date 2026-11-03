@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "equipment"
+version = "1.0.0"
+description = "Drivers and terminal control for the lab equipment: Thorlabs DC2200 LED driver and PM400 power meter, Canon EOS R10 camera and FLIR Blackfly S camera."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+# The core (CLI, Thorlabs ramp logic) needs nothing beyond the standard library.
+dependencies = []
+
+[project.optional-dependencies]
+# DC2200 / PM400 / LIV (plus the separate `measurement_control` package for the DC2200)
+thorlabs = ["pyusb>=1.2", "pyvisa>=1.12", "pyvisa-py>=0.6"]
+# Canon EOS over USB (needs the system library libgphoto2)
+canon = ["gphoto2>=2.5"]
+# FLIR Blackfly S; also needs Spinnaker+PySpin or Aravis+PyGObject (not on PyPI, see README)
+flir = ["numpy>=1.20", "opencv-python>=4.5", "pillow>=8.0"]
+all = ["equipment[thorlabs,canon,flir]"]
+test = ["pytest>=7"]
+
+[project.scripts]
+equipment = "equipment.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

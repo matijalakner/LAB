@@ -1,0 +1,79 @@
+"""`equipment devices`: which instruments are connected right now.
+
+Every probe is independent: a missing library or a permission problem is
+reported for that instrument only and never stops the others.
+"""
+from .thorlabs.common import DC2200_PRODUCT_ID, PM_PRODUCT_ID, dc2200_resource, pm_resource
+from .thorlabs.usb_driver import THORLABS_VENDOR_ID
+
+THORLABS_PRODUCTS = {DC2200_PRODUCT_ID: "DC2200 LED driver",
+                     PM_PRODUCT_ID: "PM400 power meter"}
+
+
+def probe_thorlabs():
+    """[(description, detail)] of the Thorlabs USB devices; raises if pyusb is missing."""
+    try:
+        import usb.core
+        import usb.util
+    except ImportError as e:
+        raise RuntimeError("pyusb is not installed (pip install -e \".[thorlabs]\")") from e
+    out = []
+    for dev in usb.core.find(find_all=True, idVendor=THORLABS_VENDOR_ID) or []:
+        name = THORLABS_PRODUCTS.get(dev.idProduct, f"product 0x{dev.idProduct:04x}")
+        try:
+            serial = usb.util.get_string(dev, dev.iSerialNumber) or "?"
+        except Exception:
+            serial = "? (no USB permission to read it)"
+        out.append((f"Thorlabs {name}", f"serial {serial}"))
+        usb.util.dispose_resources(dev)
+    return out
+
+
+def probe_canon():
+    try:
+        import gphoto2 as gp
+    except ImportError as e:
+        raise RuntimeError("python-gphoto2 is not installed (pip install -e \".[canon]\")") from e
+    return [(str(name), f"port {port}") for name, port in gp.Camera.autodetect()]
+
+
+def probe_flir():
+    from .flir.backends import list_cameras
+    found = list_cameras("auto")
+    if not found:
+        try:
+            import PySpin  # noqa: F401
+        except ImportError:
+            try:
+                import gi
+                gi.require_version("Aravis", "0.8")
+            except (ImportError, ValueError) as e:
+                raise RuntimeError("neither Spinnaker/PySpin nor Aravis is installed "
+                                   "(see the README, FLIR camera setup)") from e
+    return [(f"{vendor} {model}".strip(), f"serial {serial} ({backend})")
+            for backend, vendor, model, serial in found]
+
+
+PROBES = (("Thorlabs (USB)", probe_thorlabs), ("Canon (gphoto2)", probe_canon),
+          ("FLIR (USB3 Vision)", probe_flir))
+
+
+def main_devices(cfg=None):
+    """Print every instrument found; returns {group: [(name, detail)] or error text}."""
+    result = {}
+    for title, probe in PROBES:
+        print(f"{title}:")
+        try:
+            found = probe()
+        except Exception as e:
+            result[title] = str(e)
+            print(f"  not available: {e}")
+            continue
+        result[title] = found
+        if not found:
+            print("  nothing connected")
+        for name, detail in found:
+            print(f"  {name:<28} {detail}")
+    print(f"\nConfigured Thorlabs resources:\n  DC2200 {dc2200_resource()}\n"
+          f"  PM400  {pm_resource()}")
+    return result
