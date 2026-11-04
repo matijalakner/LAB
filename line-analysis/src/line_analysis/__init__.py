@@ -14,6 +14,7 @@ _EXPORTS = {
     "split_video": "video", "process_video": "video",
     "read_lines_csv": "spacing", "spacing_stats": "spacing", "analyse_spacing": "spacing",
     "tune_candidates": "tune", "tune_parameters": "tune",
+    "TrackingConfig": "track", "track_lines": "track", "track_folder": "folder",
     "main_folder": "folder", "choose_parameters": "folder", "flag_unusual": "folder",
     "photo_times": "folder", "get_sorted_photos": "folder",
     "main_report": "report", "acquire": "report", "plot_report": "report",

@@ -181,7 +181,7 @@ def choose_parameters(first_photo, out_dir, base=None, interactive=True,
         while True:
             answer = ask("Is this okay? [y = yes, n = no, q = quit] ").strip().lower()
             if answer in ("y", "yes"):
-                return config, info
+                return config, dict(info, approved_lines=list(res["lines"]))
             if answer in ("q", "quit"):
                 return None
             if answer in ("n", "no"):
@@ -280,8 +280,112 @@ def flag_unusual(rows, window=7, z_max=3.5, min_photos=3, tuning_failed=False):
     return [tuple(r[h] for h in RESULTS_HEADER) for r in recs]
 
 
+TRACKING_HEADER = ["photo", "file", "status", "n_lines", "widened", "lowered",
+                   "min_contrast_factor", "missing_x", "left_x", "reference_x"]
+
+
+def _mark_tracked(img, lines, missing, half_width):
+    """Marked photo: found lines red, expected but missing lines yellow."""
+    from .detect import mark_image
+    marked = mark_image(img, lines, half_width)
+    for x in missing:
+        x = int(round(x))
+        marked[::4, max(0, x - half_width):x + half_width + 1] = (255, 220, 0)  # dotted
+    return marked
+
+
+def track_folder(photos, out_dir, config, tracking=None, reference=None, workers=None):
+    """Analyse photos in order, each searched around the lines of the previous one.
+
+    The first photo is detected normally (or ``reference`` is used as its
+    lines); see track.py for the search rules. Writes <photo>_marked.png
+    (missing lines dotted yellow) and returns one dict per photo with lines,
+    warning and the tracking details. Photos are read ahead and saved in
+    threads; the tracking itself runs in order.
+    """
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .detect import compute_signal, threshold_from
+    from .track import TrackingConfig, check_tracking, track_lines
+
+    tracking = tracking or TrackingConfig()
+    check_tracking(tracking)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    def load(photo):
+        img = load_image(photo)
+        sig, _, min_dist, x_tol = compute_signal(img, config)
+        return img, sig, x_tol, min_dist
+
+    def save(img, photo, lines, missing):
+        Image.fromarray(_mark_tracked(img, lines, missing, config.half_width)).save(
+            out_dir / f"{photo.stem}_marked.png", compress_level=1)
+
+    workers = workers or max(1, min(4, os.cpu_count() or 1, len(photos)))
+    ahead = 2 * workers
+    results, ref = [], None
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        loads, saves = deque(), deque()
+        queue = iter(photos)
+        for p in queue:
+            loads.append((p, pool.submit(load, p)))
+            if len(loads) >= ahead:
+                break
+        n = 0
+        while loads:
+            photo, fut = loads.popleft()
+            nxt = next(queue, None)
+            if nxt is not None:
+                loads.append((nxt, pool.submit(load, nxt)))
+            n += 1
+            rec = {"photo": photo, "lines": [], "warning": "", "status": "", "missing": [],
+                   "left": [], "widened": 0, "lowered": 0, "min_factor": "", "reference": []}
+            try:
+                img, sig, x_tol, min_dist = fut.result()
+                thr = threshold_from(sig, config)
+                if ref is None:                                   # first photo: reference
+                    if reference is None:
+                        from .detect import select_lines
+                        lines = select_lines(sig, thr, config, min_dist, x_tol)
+                    else:
+                        lines = sorted(float(x) for x in reference)
+                    if not lines:
+                        raise ValueError("no lines on the first photo, nothing to track")
+                    ref = list(lines)
+                    rec.update(lines=lines, status="reference", reference=ref)
+                else:
+                    t = track_lines(sig, ref, thr, config, x_tol, tracking)
+                    rec.update(lines=t["lines"], missing=t["missing"], left=t["left"],
+                               widened=t["widened"], lowered=t["lowered"],
+                               min_factor=t["min_factor"], reference=t["reference"],
+                               status="reported" if t["reported"] else "ok")
+                    if t["reported"]:
+                        rec["warning"] = ("tracking: no line near x=" +
+                                          ", ".join(f"{x:.0f}" for x in t["missing"]))
+                    ref = t["reference"]
+                saves.append(pool.submit(save, img, photo, rec["lines"], rec["missing"]))
+                del img
+                while len(saves) > ahead:
+                    saves.popleft().result()
+            except Exception as e:
+                rec["warning"], rec["status"] = f"failed: {e}", "failed"
+                if ref is None:
+                    raise
+            results.append(rec)
+            extra = (f", {rec['widened']} widened" if rec["widened"] else "") + \
+                    (f", {rec['lowered']} at lower contrast" if rec["lowered"] else "") + \
+                    (f", {len(rec['left'])} left the picture" if rec["left"] else "")
+            print(f"[{n}/{len(photos)}] {photo.name}: {len(rec['lines'])} lines "
+                  f"({rec['status']}{extra}) {rec['warning']}")
+        for s in saves:
+            s.result()
+    return results
+
+
 def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
-                interactive=True, show=True, ask=input, config=None):
+                interactive=True, show=True, ask=input, config=None, tracking=None):
     """Analyse every photo of a folder and write <output_dir>/folder/<name>/results.csv.
 
     ``path`` is a folder or a measurement name (<input_dir>/folder/<name>). The
@@ -291,6 +395,13 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
     photo is then analysed with the confirmed settings (saved to
     parameters.json). Unusual photos get a text in ``warning`` (flag_unusual).
     interactive=False uses the first suggestion without asking.
+
+    ``tracking`` (a TrackingConfig, or True for the defaults) switches to line
+    tracking (track.py): the lines of the confirmed first photo are saved as
+    the reference, and every next photo is searched only around the lines of
+    the previous one. Photos where a line is missing are reported (warning)
+    and the next photo is searched around the last good positions. The
+    details go to tracking.csv.
     Returns the result rows, or [] if you quit.
     """
     output_dir = output_root(output_dir)
@@ -314,11 +425,20 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
             return []
         config, tuning = chosen
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "parameters.json").write_text(
-        json.dumps(dataclasses.asdict(config), indent=2), encoding="utf-8")
+    params = dataclasses.asdict(config)
+    if tracking:
+        from .track import TrackingConfig, check_tracking
+        tracking = TrackingConfig() if tracking is True else tracking
+        check_tracking(tracking)
+        params["tracking"] = dataclasses.asdict(tracking)
+    (out_dir / "parameters.json").write_text(json.dumps(params, indent=2), encoding="utf-8")
     sources = sorted({times[p][1] for p in photos})
     print(f"\nAnalysing {len(photos)} photos with: {_describe(config)}")
     print(f"Photo times from: {', '.join(sources)}")
+    if tracking:
+        return _finish_tracked(photos, times, out_dir, config, tracking,
+                               tuning.get("approved_lines"), window, z_max,
+                               tuning["status"] == "fallback")
 
     def work(photo):
         res = analyse_image(photo, out_dir, config, write_csv=False)
@@ -353,4 +473,44 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
         print(f"  photo {r[1]} ({r[2]}): {r[6]}")
     csv_path = write_csv(out_dir / "results.csv", RESULTS_HEADER, rows)
     print(f"Data: {csv_path}")
+    return rows
+
+
+def _finish_tracked(photos, times, out_dir, config, tracking, reference, window, z_max,
+                    tuning_failed):
+    """main_folder with line tracking: results.csv, tracking.csv and warnings."""
+    if reference:
+        tol = (f"{tracking.x_tolerance:g} px" if tracking.x_tolerance
+               else "20 % of the spacing")
+        print(f"Tracking {len(reference)} lines: search +-{tol}, then "
+              f"+-half the spacing; contrast steps {list(tracking.contrast_steps)}")
+    recs = track_folder(photos, out_dir, config, tracking, reference)
+    rows, track_rows = [], []
+    fmt = lambda xs: " ".join(f"{x:.1f}" for x in xs)
+    for n, rec in enumerate(recs, start=1):
+        photo, lines, warning = rec["photo"], rec["lines"], rec["warning"]
+        stats = spacing_stats(lines)
+        mean, std = "", ""
+        if stats is None:
+            warning = "; ".join(w for w in (warning, "fewer than 2 lines") if w)
+        else:
+            mean = round(stats[0], 3)
+            std = "" if np.isnan(stats[1]) else round(stats[1], 3)
+        rows.append((times[photo][0], n, photo.name, mean, len(lines), std, warning,
+                     times[photo][1]))
+        track_rows.append((n, photo.name, rec["status"], len(lines), rec["widened"],
+                           rec["lowered"], rec["min_factor"], fmt(rec["missing"]),
+                           fmt(rec["left"]), fmt(rec["reference"])))
+
+    rows = flag_unusual(rows, window=window, z_max=z_max, tuning_failed=tuning_failed)
+    reported = [r for r in track_rows if r[2] == "reported"]
+    flagged = [r for r in rows if r[6]]
+    print(f"{len(reported)} of {len(rows)} photos reported by the tracking, "
+          f"{len(flagged)} have a warning")
+    for r in flagged:
+        print(f"  photo {r[1]} ({r[2]}): {r[6]}")
+    write_csv(out_dir / "tracking.csv", TRACKING_HEADER, track_rows)
+    csv_path = write_csv(out_dir / "results.csv", RESULTS_HEADER, rows)
+    print(f"Data: {csv_path}")
+    print(f"Tracking: {out_dir / 'tracking.csv'}")
     return rows

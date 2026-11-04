@@ -123,6 +123,24 @@ output/folder/<name>/
 
 `warning` is filled in when a photo has fewer than 2 lines, a different line count from its neighbours, or an unusual spread of spacings. `time_stamp` is UTC.
 
+#### Line tracking (`--track`)
+
+With `--track`, only the first photo is detected freely. Every later photo is searched around the lines of the photo before it:
+
+1. The tuning works as above. When you confirm a photo with `y`, its line positions are saved as the reference.
+2. In the next photo, each reference line `x` gets a bracket and is looked for in `x ± x_tolerance`. If nothing is there, the search widens to half the distance to the neighbouring line on each side.
+3. A bracket holds at most one line (the strongest). A bracket that reaches past the edge of the photo may be empty, because the line has moved out. Every other bracket must hold exactly one line.
+4. If a bracket that must hold a line is still empty, the minimum contrast (the detection threshold) is lowered step by step (`--contrast-steps`, default `1,0.7,0.5,0.35`), and the narrow and wide searches are repeated.
+5. If a line is still missing, the photo is **reported**: it gets the warning `tracking: no line near x=...`, its missing lines are drawn as dotted yellow lines in the marked photo, and the next photo is searched around the previous positions. Otherwise the positions just found become the reference for the next photo. An empty edge bracket keeps its old position, so a line that comes back into the picture is found again.
+
+| Option | Meaning |
+|---|---|
+| `--track` | turn the tracking on |
+| `--x-tolerance PX` | first search range ± px (default 20 % of the line spacing, at least `x_tol`) |
+| `--contrast-steps F,F,...` | threshold factors tried in order when a line is missing |
+
+The tracking also writes `tracking.csv`: `photo, file, status` (`reference`, `ok`, `reported`, `failed`), `n_lines, widened, lowered, min_contrast_factor, missing_x, left_x, reference_x`. The tracking settings are stored in `parameters.json` under `tracking`. In Python: `main_folder("s1", tracking=TrackingConfig(x_tolerance=15))`.
+
 ### `analysis report NAME`
 
 This command lines the results of `analysis folder NAME` up with a ramp.
@@ -200,7 +218,7 @@ main_folder("s1", interactive=False, show=False)
 out = main_report("s1")                                      # out["table"] is a pandas DataFrame
 ```
 
-Lower-level functions are also exported: `detect_lines(img, config)` → `(positions, signal, threshold)`, `load_image`, `mark_image`, `tune_candidates`, `acquire`, `plot_report`, `plot_timeline`, and the readers for the equipment files: `read_log`, `read_ramp`, `capture_times`, `find_frames_log`, `read_frames_log`.
+Lower-level functions are also exported: `detect_lines(img, config)`, `track_lines`, `track_folder`, `TrackingConfig` → `(positions, signal, threshold)`, `load_image`, `mark_image`, `tune_candidates`, `acquire`, `plot_report`, `plot_timeline`, and the readers for the equipment files: `read_log`, `read_ramp`, `capture_times`, `find_frames_log`, `read_frames_log`.
 
 ## Project structure
 
@@ -215,6 +233,7 @@ line-analysis/
     ├── logs.py                readers for every equipment file, path lookup
     ├── detect.py              DetectionConfig and the line detector
     ├── tune.py                automatic settings from one photo
+    ├── track.py               line tracking from photo to photo (folder --track)
     ├── image.py               load (8/16 bit), detect, mark, save
     ├── video.py               frame selection (real FLIR frame times), video pipeline
     ├── spacing.py             spacing statistics and the spacing plot
