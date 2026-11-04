@@ -22,7 +22,7 @@ Drivers and terminal control for the lab equipment:
 
 `--photos` and `--power` can be used together, for example pE-300 + FLIR + PM400 in one run.
 
-The code was split out of [LineTracker](https://github.com/matijalakner/LineTracker) (its `src/Canon`, `src/FLIR`, `src/ThorLabs`). The file layout and CSV formats are unchanged, so LineTracker's `measurement analysis folder` and `analysis report` read the photos and ramp logs written here as they are.
+The code was split out of [LineTracker](https://github.com/matijalakner/LineTracker) (its `src/Canon`, `src/FLIR`, `src/ThorLabs`). The file layout and CSV formats are unchanged. The photos and logs written here are analysed by [line-analysis](../line-analysis), the other module of this LAB repository.
 
 ## Contents
 
@@ -43,10 +43,11 @@ The code was split out of [LineTracker](https://github.com/matijalakner/LineTrac
 Requires Python 3.10 or newer. The core and the CLI need only the standard library. You install the extra for each instrument you use:
 
 ```bash
-git clone https://github.com/matijalakner/equipment.git
+git clone https://github.com/matijalakner/LAB.git
+cd LAB                                         # one environment for everything: LAB/lab
+python3 -m venv --system-site-packages lab     # system site packages: needed for Aravis (FLIR)
+source lab/bin/activate
 cd equipment
-python3 -m venv --system-site-packages equip   # system site packages: needed for Aravis (FLIR)
-source equip/bin/activate
 pip install -e ".[thorlabs]"        # DC2200, PM400, LIV:  pyusb, pyvisa, pyvisa-py
 pip install -e ".[coolled]"         # pE-300:              pyserial
 pip install -e ".[canon]"           # Canon:               python-gphoto2 (needs libgphoto2)
@@ -297,7 +298,7 @@ The ramp, pm and camera CSVs start with a line `time_stamp,<UTC time at t = 0>`,
 | liv | `time_s, cycle, direction, LEVEL, power_W` (no time stamp line) |
 | camera / flir | `time_s, index, file, utc` |
 
-`LEVEL` is `current_A` for the DC2200 (the same as before) and `intensity_pct` for the pE-300. LineTracker's `analysis report` expects `current_A`, so for a pE-300 ramp you have to adapt it.
+`LEVEL` is `current_A` for the DC2200 (the same as before) and `intensity_pct` for the pE-300. [line-analysis](../line-analysis) reads both.
 
 Numbering of `<name>_XXXX` continues after the files already in the folder, so nothing is overwritten.
 

@@ -1,6 +1,6 @@
 # line-analysis
 
-This package finds thin vertical lines in the photos and videos taken with [equipment](https://github.com/matijalakner/equipment). It measures how far apart the lines are and relates that spacing to the light-source ramp and the measured optical power.
+This package finds thin vertical lines in the photos and videos taken with [equipment](../equipment), the other module of this LAB repository. It measures how far apart the lines are and relates that spacing to the light-source ramp and the measured optical power.
 
 ```text
 analysis image   IMAGE        lines of one photo
@@ -31,17 +31,16 @@ Requires Python 3.10 or newer. The expected lab layout is:
 ```text
 LAB/
 ├── equipment/
-├── line-analysis/        this repository
+├── line-analysis/        this module
 └── data/
     ├── input/            photos and videos written by equipment (input/folder/<name>/)
     └── output/           equipment logs (ramp/, camera/, ...) and the results of analysis
 ```
 
 ```bash
-cd LAB
-git clone https://github.com/matijalakner/line-analysis.git
-cd line-analysis
-python3 -m venv analysis-env && source analysis-env/bin/activate
+git clone https://github.com/matijalakner/LAB.git
+cd LAB/line-analysis
+source ../lab/bin/activate    # the shared LAB environment (see ../setup.sh)
 pip install -e .            # numpy, pillow, opencv-python, matplotlib, pandas
 analysis --help
 ```

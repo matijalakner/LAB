@@ -1,0 +1,17 @@
+# measurement data: the folders are tracked, what is inside them is not
+data/input/*
+data/output/*
+!data/input/.gitkeep
+!data/output/.gitkeep
+
+# environments
+lab/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/

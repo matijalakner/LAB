@@ -3,9 +3,8 @@ __pycache__/
 *.egg-info/
 build/
 dist/
-.venv/
+lab/
 venv/
-analysis-env/
 .pytest_cache/
 # measurement data
 output/
