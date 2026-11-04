@@ -350,3 +350,11 @@ def test_permission_denied_is_reported(fake_serial, monkeypatch):
     assert "dialout" in str(e.value.code)
     with pytest.raises(PermissionError, match="dialout"):
         pe300._probe("/dev/ttyACM7")
+
+
+def test_devices_lists_one_unit_once(fake_serial, monkeypatch):
+    from equipment import devices
+    mod = pe300._import_serial()
+    same = _ports(("/dev/ttyACM1", "0000", "3-9:1.2"), ("/dev/ttyACM0", "0000", "3-9:1.0"))
+    monkeypatch.setattr(mod.tools.list_ports, "comports", lambda: same)
+    assert devices.probe_pe300() == [("CoolLED pE-300", "ports /dev/ttyACM0, /dev/ttyACM1")]

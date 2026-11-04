@@ -41,8 +41,13 @@ def probe_canon():
 
 
 def probe_pe300():
-    from .coolled.pe300 import candidate_ports
-    return [("CoolLED pE-300", f"port {dev} ({desc})") for dev, desc in candidate_ports()]
+    """One line per pE-300; a unit with several serial ports is listed once."""
+    from .coolled.pe300 import _coolled_ports, _port_sort_key, _usb_unit
+    units = {}
+    for p in sorted(_coolled_ports(), key=lambda p: _port_sort_key(p.device)):
+        units.setdefault(_usb_unit(p) or p.device, []).append(p.device)
+    return [("CoolLED pE-300", "ports " + ", ".join(ports) if len(ports) > 1
+             else f"port {ports[0]}") for ports in units.values()]
 
 
 def probe_flir():
