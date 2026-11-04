@@ -11,7 +11,7 @@ import dataclasses
 import os
 import sys
 
-from .calibration import COEFF, PX_TO_UM, THETA
+from .calibration import COEFF, PE300_W_PER_PCT, PX_TO_UM, THETA
 from .detect import DetectionConfig
 from .paths import ENV_VAR, input_root, output_root
 
@@ -111,6 +111,9 @@ def build_parser():
     rep.add_argument("--objective", choices=sorted(COEFF), default="20x",
                      help="DC2200 only: intensity per ampere, used without measured power "
                           "(default 20x)")
+    rep.add_argument("--color", choices=sorted(PE300_W_PER_PCT), default=None,
+                     help="pE-300 only: colour of the ramped channel; gives the power on "
+                          "the sample from the calibration when no power was measured")
     rep.add_argument("--sample", choices=sorted(THETA), default="0.8wt",
                      help="angle for the pitch (default 0.8wt)")
     rep.add_argument("--px-um", type=float, default=PX_TO_UM,
@@ -156,7 +159,7 @@ def run(args):
         from .report import main_report
         out = main_report(args.name, args.ramp, args.results, args.output_dir,
                           args.objective, args.sample, args.px_um, args.camera_offset,
-                          args.liv)
+                          args.liv, args.color)
         print(f"Ramp: {out['ramp_path']} ({out['level']})")
         print(f"{out['photos']} photos matched by {out['matched_by']}, "
               f"{out['plotted']} plotted (the others have a warning)")

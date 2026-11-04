@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from line_analysis import cli
-from line_analysis.calibration import COEFF
+from line_analysis.calibration import COEFF, PE300_W_PER_PCT
 from line_analysis.folder import main_folder
 from line_analysis.report import main_report
 from conftest import save_photo, write_log
@@ -104,6 +104,18 @@ def test_liv_curve_gives_the_power_axis(dirs):
     rep = main_report("s3", output_dir=out, liv=liv)
     assert rep["power_source"].startswith("LIV")
     assert np.allclose(rep["table"]["power[W]"], rep["table"]["intensity[%]"] * 2e-5)
+
+
+def test_pe300_color_calibration_gives_the_power(dirs):
+    inp, out = dirs
+    seq = make_ramp(out, "r", "intensity_pct", [0, 50, 100])
+    make_photos(inp, out, "r", "s5", seq, "intensity_pct")
+    main_folder("s5", out, inp, interactive=False, show=False)
+    rep = main_report("s5", output_dir=out, color="green")
+    assert rep["power_source"].startswith("pE-300 green")
+    assert np.allclose(rep["table"]["power[W]"],
+                       rep["table"]["intensity[%]"] * PE300_W_PER_PCT["green"])
+    assert "power[W]" not in main_report("s5", output_dir=out)["table"]
 
 
 def test_report_needs_photos_of_the_ramp(dirs):

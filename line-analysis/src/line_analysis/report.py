@@ -17,7 +17,8 @@ How each photo gets its level, in this order:
 
 Power per photo, in this order: the PM400 reading of the photo's step
 (<ramp>_power.csv), the LIV curve interpolated at the photo's level, or for a
-DC2200 ramp the calibrated intensity ``current * COEFF[objective]``.
+pE-300 ramp the calibrated power ``intensity * PE300_W_PER_PCT[color]``. For a
+DC2200 ramp the calibrated intensity ``current * COEFF[objective]`` is added.
 """
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from .paths import output_root
 import numpy as np
 import pandas as pd
 
-from .calibration import COEFF, PX_TO_UM, THETA
+from .calibration import COEFF, PE300_W_PER_PCT, PX_TO_UM, THETA
 from .logs import LEVELS, companion, level_column, ramp_files, read_log, read_ramp
 
 BASE_COLUMNS = ["time[s]", "step", "cycle", "direction"]
@@ -132,7 +133,8 @@ def liv_curve(path):
     return col, g.index.to_numpy(dtype=float), g.to_numpy(dtype=float)
 
 
-def acquire(ramp_csv, results_csv, camera_offset_s=0.0, liv=None, objective=None):
+def acquire(ramp_csv, results_csv, camera_offset_s=0.0, liv=None, objective=None,
+            color=None):
     """One row per photo with its ramp level (and power when known).
 
     Columns: time[s] (since the ramp start), step, cycle, direction, the level
@@ -165,6 +167,11 @@ def acquire(ramp_csv, results_csv, camera_offset_s=0.0, liv=None, objective=None
             raise ValueError(f"the LIV file has {liv_col}, the ramp has {col}")
         table["power[W]"] = np.interp(level, x, y, left=np.nan, right=np.nan)
         power_source = f"LIV curve {Path(liv).name}"
+    elif col == "intensity_pct" and color:
+        if color not in PE300_W_PER_PCT:
+            raise ValueError(f"unknown colour '{color}'; choose from {sorted(PE300_W_PER_PCT)}")
+        table["power[W]"] = level * PE300_W_PER_PCT[color]
+        power_source = f"pE-300 {color} calibration ({PE300_W_PER_PCT[color]:.4g} W/%)"
     if col == "current_A" and objective:
         if objective not in COEFF:
             raise ValueError(f"unknown objective '{objective}'; choose from {sorted(COEFF)}")
@@ -271,7 +278,8 @@ def plot_timeline(table, info, out_png, name="", theta="0.8wt", px_to_um=PX_TO_U
 
 
 def main_report(name, ramp=None, results=None, output_dir=None, objective="20x",
-                theta="0.8wt", px_to_um=PX_TO_UM, camera_offset_s=0.0, liv=None):
+                theta="0.8wt", px_to_um=PX_TO_UM, camera_offset_s=0.0, liv=None,
+                color=None):
     """Align, save and plot -> <output_dir>/report/<name>/data.csv, plots.png, timeline.png.
 
     ``results`` defaults to ``name`` (the folder name used with 'analysis folder').
@@ -280,7 +288,8 @@ def main_report(name, ramp=None, results=None, output_dir=None, objective="20x",
     results_path = find_results_csv(results or name, output_dir)
     files = pd.read_csv(results_path)["file"].astype(str)
     ramp_path = find_ramp_csv(ramp, output_dir, files)
-    table, info = acquire(ramp_path, results_path, camera_offset_s, liv, objective)
+    table, info = acquire(ramp_path, results_path, camera_offset_s, liv, objective,
+                          color)
     if table.empty:
         raise ValueError(f"No photo of '{name}' belongs to {ramp_path.name}: it is not in "
                          "the ramp's photo log and was not taken while the ramp ran. Pass "

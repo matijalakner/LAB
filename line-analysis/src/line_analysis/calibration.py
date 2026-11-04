@@ -8,6 +8,13 @@ COEFF = {
     "40x": 8.824088200840021e-08,
 }
 
+# power on the sample [W] = pE-300 intensity [%] * PE300_W_PER_PCT[colour]
+# (slope of the up branch of the 0-100 % calibration ramps, 2026-11-04)
+PE300_W_PER_PCT = {
+    "blue": 6.33421762e-06,
+    "green": 5.69139837e-06,
+}
+
 # angle used for the pitch = 2 * THETA * distance, per sample concentration
 THETA = {
     "0.2wt": 0.011327835,

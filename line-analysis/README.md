@@ -133,7 +133,7 @@ This command lines the results of `analysis folder NAME` up with a ramp.
 1. **Photo log**: the photo's row in `<ramp>_photos.csv`, with the level, step, cycle and direction recorded when it was taken.
 2. **Time**: if a photo is not in the photo log (for example, a separate time-lapse during the ramp), its time from `results.csv` is compared with the ramp's time stamp. Only photos taken while the ramp ran are kept. `--camera-offset S` corrects a camera clock that is off. It only matters when the time comes from EXIF.
 
-**Power of each photo:** it comes from the PM400 reading of the photo's step (`<ramp>_power.csv`). Without that file it comes from `--liv FILE`, interpolated at the photo's level. For a DC2200 ramp without either, the calibrated intensity `current × COEFF[--objective]` is used.
+**Power of each photo:** it comes from the PM400 reading of the photo's step (`<ramp>_power.csv`). Without that file it comes from `--liv FILE`, interpolated at the photo's level. For a pE-300 ramp without either, `--color blue|green` gives the power on the sample from the calibration, `intensity × PE300_W_PER_PCT[--color]` (blue 6.334 µW/%, green 5.691 µW/%). For a DC2200 ramp without either, the calibrated intensity `current × COEFF[--objective]` is used.
 
 | Option | Meaning |
 |---|---|
@@ -141,6 +141,7 @@ This command lines the results of `analysis folder NAME` up with a ramp.
 | `--results` | a results CSV instead of the one of `NAME` |
 | `--liv` | LIV CSV from `equipment liv` with the same light source |
 | `--objective` | `5x`, `10x`, `20x`, `40x` (DC2200 only, default 20x) |
+| `--color` | `blue`, `green` (pE-300 only): power on the sample from the calibration when no power was measured |
 | `--sample` | `0.2wt` ... `1.5wt`: the angle for the pitch (default 0.8wt) |
 | `--px-um` | micrometres per pixel (default 0.1813) |
 | `--camera-offset` | seconds added to the photo times when they are matched by time |
@@ -217,7 +218,7 @@ line-analysis/
     ├── spacing.py             spacing statistics and the spacing plot
     ├── folder.py              folder analysis, photo times, warnings
     ├── report.py              photo ↔ ramp ↔ power, report plots
-    ├── calibration.py         objective, sample and pixel-size constants
+    ├── calibration.py         objective, pE-300, sample and pixel-size constants
     └── style.py               plot look
 ```
 
