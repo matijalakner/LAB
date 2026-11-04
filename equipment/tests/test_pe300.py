@@ -292,3 +292,25 @@ def test_liv_with_pe300(fake_serial, fake_meter, tmp_path):
     assert levels[0] == 0 and max(levels) == 50 and levels[-1] == 0
     assert all(isinstance(x, int) for x in levels)
     assert device(fake_serial).lit() == {}
+
+
+def test_two_coolled_ports_the_answering_one_is_used(fake_serial, monkeypatch):
+    two = [types.SimpleNamespace(device=d, description="CoolLED pE-300", manufacturer="CoolLED",
+                                 product=None, interface=None, vid=1, pid=1)
+           for d in ("/dev/ttyACM1", "/dev/ttyACM0")]
+    mod = pe300._import_serial()
+    monkeypatch.setattr(mod.tools.list_ports, "comports", lambda: two)
+    monkeypatch.setattr(pe300, "_probe", lambda port, timeout=0.6: port == "/dev/ttyACM0")
+    assert pe300.find_port() == "/dev/ttyACM0"
+    monkeypatch.setattr(pe300, "_probe", lambda port, timeout=0.6: True)
+    with pytest.raises(RuntimeError, match="more than one pE-300 answered"):
+        pe300.find_port()
+    monkeypatch.setattr(pe300, "_probe", lambda port, timeout=0.6: False)
+    with pytest.raises(RuntimeError, match="none answered"):
+        pe300.find_port()
+
+
+def test_channel_letter_as_port_is_refused(fake_serial):
+    with pytest.raises(SystemExit) as e:
+        cli.main(["pe300", "set", "30", "--port", "B"])
+    assert "not a serial port" in str(e.value.code)

@@ -131,8 +131,16 @@ def find_port(port=None):
     if len(named) == 1:
         return named[0][0]
     if len(named) > 1:
-        raise RuntimeError("more than one CoolLED port found ("
-                           + ", ".join(d for d, _ in named) + "); choose one with --port")
+        # one unit can show up as several serial ports: use the one that answers
+        answering = [d for d, _ in named if _probe(d)]
+        if len(answering) == 1:
+            return answering[0]
+        ports = ", ".join(answering or [d for d, _ in named])
+        if not answering:
+            raise RuntimeError(f"CoolLED ports found ({ports}) but none answered 'CSS?'. "
+                               "Is the pE-300 switched on? Is another program using it?")
+        raise RuntimeError(f"more than one pE-300 answered ({ports}); choose one with "
+                           f"--port, e.g. --port {answering[0]}")
     serial = _import_serial()
     usb = [p.device for p in serial.tools.list_ports.comports()
            if p.vid is not None or re.search(r"ttyACM|ttyUSB|usbmodem|COM\d", p.device)]
@@ -165,6 +173,9 @@ class PE300:
     def open(self):
         serial = _import_serial()
         self.port = find_port(self.port_wanted)
+        if self.port_wanted and not re.search(r"[/\\]|^COM\d+$", str(self.port_wanted), re.I):
+            raise ValueError(f"--port '{self.port_wanted}' is not a serial port; give the "
+                             "device, e.g. /dev/ttyACM0 or COM3 (channels go in --channels)")
         try:
             self.ser = serial.Serial(self.port, BAUD, timeout=0.05, write_timeout=1.0)
         except serial.SerialException as e:
