@@ -165,7 +165,7 @@ def run(args):
               f"{out['plotted']} plotted (the others have a warning)")
         if out["power_source"]:
             print(f"Power from {out['power_source']}")
-        for key in ("csv_path", "plot_path", "timeline_path"):
+        for key in ("csv_path", "plot_path", "fits_path", "timeline_path"):
             print(f"  {out[key]}")
 
 

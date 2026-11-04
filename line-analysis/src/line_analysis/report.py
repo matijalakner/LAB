@@ -198,12 +198,27 @@ def _x_axes(table, info, objective):
     return axes
 
 
+def linear_fit(x, y):
+    """Least-squares line y = slope * x + intercept -> (slope, intercept, r2, n) or None."""
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    keep = np.isfinite(x) & np.isfinite(y)
+    x, y = x[keep], y[keep]
+    if len(x) < 2 or np.ptp(x) == 0:
+        return None
+    slope, intercept = np.polyfit(x, y, 1)
+    ss_tot = float(((y - y.mean()) ** 2).sum())
+    r2 = 1 - float(((y - slope * x - intercept) ** 2).sum()) / ss_tot if ss_tot else 1.0
+    return float(slope), float(intercept), r2, int(len(x))
+
+
 def plot_report(table, info, out_png, name="", objective="20x", theta="0.8wt",
-                px_to_um=PX_TO_UM):
+                px_to_um=PX_TO_UM, fits_csv=None):
     """Average distance and pitch against the level, power and time.
 
-    Up and down branches of the ramp are drawn separately (hysteresis shows).
-    Photos with a warning are left out. Returns the number of photos plotted.
+    Up and down branches of the ramp are drawn separately (hysteresis shows),
+    each with its linear fit on the level and power axes (not against time).
+    The fits are written to ``fits_csv`` if given. Photos with a warning are
+    left out. Returns the number of photos plotted.
     """
     from .style import DIRECTION_STYLE, MUTED, figure, finish
 
@@ -218,21 +233,43 @@ def plot_report(table, info, out_png, name="", objective="20x", theta="0.8wt",
         ok["power[mW]"] = ok["power[W]"] * 1e3
 
     xs = _x_axes(table, info, objective)
+    fits = []
     ys = [("distance", "average distance [µm]"), ("pitch", f"pitch [µm] ({theta})")]
     fig, axes = figure(2, len(xs), figsize=(5 * len(xs), 8), sharey="row", squeeze=False)
     for r, (ycol, ylabel) in enumerate(ys):
         for c, (xcol, xlabel) in enumerate(xs):
             ax = axes[r, c]
+            fit_handles = []
             for direction, part in ok.groupby("direction", sort=False):
                 color, marker = DIRECTION_STYLE.get(direction, (MUTED, "s"))
                 ax.scatter(part[xcol], part[ycol], s=30, color=color, marker=marker,
                            edgecolors="white", linewidths=1, label=f"ramp {direction}",
                            zorder=3)
+                if xcol == "time[s]":
+                    continue
+                fit = linear_fit(part[xcol], part[ycol])
+                if fit is None:
+                    continue
+                slope, intercept, r2, n = fit
+                fits.append({"y": ycol, "x": xcol, "direction": direction, "slope": slope,
+                             "intercept": intercept, "r2": r2, "n": n})
+                xx = np.array([np.nanmin(part[xcol]), np.nanmax(part[xcol])], dtype=float)
+                line, = ax.plot(xx, slope * xx + intercept, color=color, lw=1.5, zorder=2,
+                                label=f"{direction}: slope {slope:.4g}, R² {r2:.3f}")
+                fit_handles.append(line)
             ax.set_xlabel(xlabel)
             if c == 0:
                 ax.set_ylabel(ylabel)
             ax.tick_params(labelleft=True)
-    axes[0, 0].legend(loc="best")
+            if fit_handles:
+                ax.legend(handles=fit_handles, loc="lower right", fontsize=8)
+    fit_legend = axes[0, 0].get_legend()
+    axes[0, 0].legend(handles=list(axes[0, 0].collections), loc="upper left")
+    if fit_legend is not None:
+        axes[0, 0].add_artist(fit_legend)
+    if fits_csv:
+        pd.DataFrame(fits, columns=["y", "x", "direction", "slope", "intercept", "r2", "n"]
+                     ).to_csv(fits_csv, index=False)
     note = f"level by {info['matched_by']}"
     if info["power_source"]:
         note += f", power from {info['power_source']}"
@@ -299,10 +336,13 @@ def main_report(name, ramp=None, results=None, output_dir=None, objective="20x",
     csv_path = out_dir / "data.csv"
     table.to_csv(csv_path, index=False)
     plot_path, timeline_path = out_dir / "plots.png", out_dir / "timeline.png"
-    plotted = plot_report(table, info, plot_path, name, objective, theta, px_to_um)
+    fits_path = out_dir / "fits.csv"
+    plotted = plot_report(table, info, plot_path, name, objective, theta, px_to_um,
+                          fits_csv=fits_path)
     plot_timeline(table, info, timeline_path, name, theta, px_to_um)
     return {"table": table, "ramp_path": str(ramp_path), "results_path": str(results_path),
             "csv_path": str(csv_path), "plot_path": str(plot_path),
-            "timeline_path": str(timeline_path), "photos": len(table), "plotted": plotted,
+            "timeline_path": str(timeline_path), "fits_path": str(fits_path),
+            "photos": len(table), "plotted": plotted,
             "matched_by": info["matched_by"], "power_source": info["power_source"],
             "level": info["level"]}

@@ -115,6 +115,9 @@ def test_pe300_color_calibration_gives_the_power(dirs):
     assert rep["power_source"].startswith("pE-300 green")
     assert np.allclose(rep["table"]["power[W]"],
                        rep["table"]["intensity[%]"] * PE300_W_PER_PCT["green"])
+    fits = pd.read_csv(rep["fits_path"])
+    assert set(fits["x"]) == {"intensity[%]", "power[mW]"}
+    assert set(fits["y"]) == {"distance", "pitch"}
     assert "power[W]" not in main_report("s5", output_dir=out)["table"]
 
 

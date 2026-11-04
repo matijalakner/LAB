@@ -153,6 +153,8 @@ output/report/<name>/
 │                 warning, n_lines, file
 ├── plots.png     distance and pitch against level, power (or intensity) and time;
 │                 the up and down branches of the ramp are drawn separately
+│                 with a linear fit per branch on the level and power axes
+├── fits.csv      y, x, direction, slope, intercept, r2, n of every fit
 └── timeline.png  level, power and pitch on the ramp's own time axis
 ```
 
