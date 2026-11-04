@@ -8,6 +8,7 @@ Photo times come, in this order, from
   3. the file time.
 The ``time_source`` column of results.csv says which one was used.
 """
+from .paths import input_root, output_root
 import dataclasses
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -61,8 +62,9 @@ def _iso(t):
         timespec="milliseconds").replace("+00:00", "Z")
 
 
-def photo_times(photos, output_dir="output", logged=None):
+def photo_times(photos, output_dir=None, logged=None):
     """{photo: (UTC time text, source)} with source "log", "exif" or "file"."""
+    output_dir = output_root(output_dir)
     logged = capture_times(output_dir) if logged is None else logged
     out = {}
     for p in photos:
@@ -77,8 +79,9 @@ def photo_times(photos, output_dir="output", logged=None):
     return out
 
 
-def get_sorted_photos(folder, output_dir="output", times=None):
+def get_sorted_photos(folder, output_dir=None, times=None):
     """(photos sorted by capture time, {photo: (utc, source)})."""
+    output_dir = output_root(output_dir)
     folder = Path(folder)
     if not folder.is_dir():
         raise FileNotFoundError(f"Folder not found: {folder}")
@@ -277,7 +280,7 @@ def flag_unusual(rows, window=7, z_max=3.5, min_photos=3, tuning_failed=False):
     return [tuple(r[h] for h in RESULTS_HEADER) for r in recs]
 
 
-def main_folder(path, output_dir="output", input_dir="input", window=7, z_max=3.5,
+def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
                 interactive=True, show=True, ask=input, config=None):
     """Analyse every photo of a folder and write <output_dir>/folder/<name>/results.csv.
 
@@ -290,6 +293,8 @@ def main_folder(path, output_dir="output", input_dir="input", window=7, z_max=3.
     interactive=False uses the first suggestion without asking.
     Returns the result rows, or [] if you quit.
     """
+    output_dir = output_root(output_dir)
+    input_dir = input_root(input_dir)
     folder = resolve_folder(path, input_dir)
     photos, times = get_sorted_photos(folder, output_dir)
     out_dir = Path(output_dir) / "folder" / folder.name

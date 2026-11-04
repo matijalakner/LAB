@@ -1,4 +1,5 @@
 """Line spacing over time, from the lines.csv written by process_video."""
+from .paths import output_root
 import csv
 import json
 from pathlib import Path
@@ -34,8 +35,9 @@ def spacing_stats(xs):
     return float(d.mean()), std, len(xs)
 
 
-def find_video_dir(name, output_dir="output"):
+def find_video_dir(name, output_dir=None):
     """<output_dir>/video/<name>, or ``name`` itself if it is a folder with lines.csv."""
+    output_dir = output_root(output_dir)
     p = Path(name)
     if (p / "lines.csv").exists():
         return p
@@ -45,12 +47,13 @@ def find_video_dir(name, output_dir="output"):
     return d
 
 
-def analyse_spacing(name, output_dir="output"):
+def analyse_spacing(name, output_dir=None):
     """Mean line spacing (error bar = std) against time for an analysed video.
 
     Reads <output_dir>/video/<name>/lines.csv, writes spacing.csv and spacing.png
     next to it. Frames with fewer than 2 lines are skipped.
     """
+    output_dir = output_root(output_dir)
     from .style import BLUE, figure, finish
 
     d = find_video_dir(name, output_dir)

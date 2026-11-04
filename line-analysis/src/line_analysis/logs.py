@@ -13,6 +13,7 @@ All but the LIV file start with ``time_stamp,<UTC time at t = 0>``. LEVEL is
 """
 from pathlib import Path
 
+from .paths import input_root, output_root
 import pandas as pd
 
 from .utils import read_time_stamp
@@ -51,8 +52,9 @@ def companion(ramp_csv, kind):
     return p.with_name(f"{p.stem}_{kind}.csv")
 
 
-def ramp_files(output_dir="output"):
+def ramp_files(output_dir=None):
     """Every ramp CSV in <output_dir>/ramp/, oldest first (by its time stamp line)."""
+    output_dir = output_root(output_dir)
     folder = Path(output_dir) / "ramp"
     files = [p for p in folder.glob("*.csv")
              if not any(p.stem.endswith("_" + k) for k in COMPANIONS)]
@@ -83,12 +85,13 @@ def read_ramp(path):
 # ---------------------------------------------------------------------------
 # photo times
 # ---------------------------------------------------------------------------
-def capture_times(output_dir="output"):
+def capture_times(output_dir=None):
     """{file name: (utc Timestamp, log path)} from every capture log and ramp photo log.
 
     The utc column is the computer time when the capture started, so it does not
     depend on the camera clock. Later logs win when a name appears twice.
     """
+    output_dir = output_root(output_dir)
     out = {}
     root = Path(output_dir)
     logs = [p for p in (root / "camera").glob("*.csv") if not p.stem.endswith("_frames")]
@@ -108,12 +111,13 @@ def capture_times(output_dir="output"):
     return out
 
 
-def find_frames_log(video, output_dir="output"):
+def find_frames_log(video, output_dir=None):
     """The FLIR ``_frames.csv`` that belongs to a video, or None.
 
     The video's capture log (``<output_dir>/camera/flir_<UTC>.csv``) lists the
     video file; its frame log sits next to it with ``_frames`` added.
     """
+    output_dir = output_root(output_dir)
     name = Path(video).name
     for log in sorted((Path(output_dir) / "camera").glob("*.csv")):
         if log.stem.endswith("_frames"):
@@ -142,8 +146,9 @@ def read_frames_log(path):
 # ---------------------------------------------------------------------------
 # paths
 # ---------------------------------------------------------------------------
-def resolve_folder(path, input_dir="input"):
+def resolve_folder(path, input_dir=None):
     """A photo folder, given as a path or as the measurement name."""
+    input_dir = input_root(input_dir)
     p = Path(path)
     if p.is_dir():
         return p
@@ -153,8 +158,9 @@ def resolve_folder(path, input_dir="input"):
     raise FileNotFoundError(f"No folder '{path}' (also tried {q})")
 
 
-def resolve_media(path, input_dir="input"):
+def resolve_media(path, input_dir=None):
     """A photo or video, given as a path or as a file name like mysample_0003.mp4."""
+    input_dir = input_root(input_dir)
     p = Path(path)
     if p.is_file():
         return p

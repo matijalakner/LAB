@@ -8,10 +8,12 @@
 """
 import argparse
 import dataclasses
+import os
 import sys
 
 from .calibration import COEFF, PX_TO_UM, THETA
 from .detect import DetectionConfig
+from .paths import ENV_VAR, input_root, output_root
 
 _DETECTION_HELP = {
     "n_blocks": "horizontal bands that must agree (default 8)",
@@ -46,11 +48,11 @@ def config_from_args(args):
 
 
 def add_dirs(parser, inputs=True):
-    parser.add_argument("--output-dir", default="output",
-                        help="root of the results and of the equipment logs (default: output)")
+    parser.add_argument("--output-dir", default=None,
+                        help="equipment logs and the results (default: <data>/output)")
     if inputs:
-        parser.add_argument("--input-dir", default="input",
-                            help="root of the photos and videos (default: input)")
+        parser.add_argument("--input-dir", default=None,
+                            help="photos and videos (default: <data>/input)")
 
 
 def build_parser():
@@ -59,6 +61,9 @@ def build_parser():
         description="Find thin vertical lines in the photos and videos taken with "
                     "'equipment' and relate their spacing to the light-source ramp.")
     p.add_argument("--debug", action="store_true", help="show the full traceback on errors")
+    p.add_argument("--data-dir", default=None,
+                   help="folder with equipment's input/ and output/ (default: $LINE_ANALYSIS_DATA, "
+                        "else 'data' next to the line-analysis folder, else ./data, else .)")
     sub = p.add_subparsers(dest="command", required=True)
 
     img = sub.add_parser("image", help="Detect the lines in one photo.")
@@ -117,6 +122,11 @@ def build_parser():
 
 
 def run(args):
+    if args.data_dir:
+        os.environ[ENV_VAR] = args.data_dir
+    args.output_dir = str(output_root(args.output_dir))
+    if hasattr(args, "input_dir"):
+        args.input_dir = str(input_root(args.input_dir))
     if args.command == "image":
         from .image import analyse_image
         from .logs import resolve_media

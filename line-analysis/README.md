@@ -26,9 +26,19 @@ The outputs use LineTracker's layout and CSV formats (`output/image`, `output/vi
 
 ## Installation
 
-Requires Python 3.10 or newer.
+Requires Python 3.10 or newer. The expected lab layout is:
+
+```text
+LAB/
+├── equipment/
+├── line-analysis/        this repository
+└── data/
+    ├── input/            photos and videos written by equipment (input/folder/<name>/)
+    └── output/           equipment logs (ramp/, camera/, ...) and the results of analysis
+```
 
 ```bash
+cd LAB
 git clone https://github.com/matijalakner/line-analysis.git
 cd line-analysis
 python3 -m venv analysis-env && source analysis-env/bin/activate
@@ -36,7 +46,18 @@ pip install -e .            # numpy, pillow, opencv-python, matplotlib, pandas
 analysis --help
 ```
 
-It can share an environment with `equipment`; neither package needs the other. Use the same `--input-dir` / `--output-dir` (default `input` / `output`) as you used with `equipment`, or run both from the same folder.
+It can share an environment with `equipment`; neither package needs the other.
+
+### Where the data is
+
+`analysis` reads and writes in `LAB/data`, wherever you run it from. The data folder is the first of:
+
+1. `--data-dir PATH` (before the command: `analysis --data-dir D:/run2 folder s1`), or the environment variable `LINE_ANALYSIS_DATA`;
+2. `data/` next to the `line-analysis` folder, which is `LAB/data`. This needs the editable install (`pip install -e .`), because the package finds its own folder;
+3. `data/` in the current folder;
+4. the current folder itself (plain `input/` and `output/`).
+
+Inside it, photos and videos come from `<data>/input`. Equipment logs are read from `<data>/output`, and the results are written to `<data>/output` too. `--input-dir` / `--output-dir` on a command override each one separately.
 
 ## Typical run
 
@@ -52,7 +73,7 @@ analysis report mysample        # finds the ramp whose photo log lists these pho
 
 ## Commands
 
-Every command takes `--output-dir` (default `output`). The commands that read photos or videos also take `--input-dir` (default `input`). Add `--debug` before the command to get a full traceback instead of a one-line error.
+Paths below are inside the [data folder](#where-the-data-is) (`LAB/data`): `input/...` means `LAB/data/input/...`. Every command takes `--output-dir`, and the commands that read photos or videos also take `--input-dir`. Add `--debug` before the command to get a full traceback instead of a one-line error.
 
 ### `analysis image IMAGE`
 
@@ -188,6 +209,7 @@ line-analysis/
 ├── tests/                     includes an end-to-end run through the equipment CLI
 └── src/line_analysis/
     ├── cli.py                 the `analysis` command
+    ├── paths.py               where the data folder is (LAB/data)
     ├── logs.py                readers for every equipment file, path lookup
     ├── detect.py              DetectionConfig and the line detector
     ├── tune.py                automatic settings from one photo

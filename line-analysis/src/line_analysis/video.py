@@ -5,6 +5,7 @@ For a FLIR video the real time of every frame is in the ``_frames.csv`` log that
 nominal frame rate in the file is not exact; with the log the frames are
 chosen, and given their times, from the real clock.
 """
+from .paths import input_root, output_root
 import json
 from pathlib import Path
 
@@ -77,8 +78,8 @@ def split_video(video_path, frames_dir, interval=1.0, frame_times=None):
         cap.release()
 
 
-def process_video(video_path, output_dir="output", interval=1.0, config=None,
-                  frames_log="auto", input_dir="input", verbose=True):
+def process_video(video_path, output_dir=None, interval=1.0, config=None,
+                  frames_log="auto", input_dir=None, verbose=True):
     """Split a video every ``interval`` seconds and analyse every frame.
 
     ``video_path`` may also be just the file name (mysample_0003.mp4), which is
@@ -95,6 +96,8 @@ def process_video(video_path, output_dir="output", interval=1.0, config=None,
     recording when a frame log is used, otherwise the start of the analysis.
     Returns a list of dicts with time, frame and lines.
     """
+    output_dir = output_root(output_dir)
+    input_dir = input_root(input_dir)
     config = config or DetectionConfig()
     video_path = resolve_media(video_path, input_dir)
     time_stamp, frame_times = utc_timestamp(), None

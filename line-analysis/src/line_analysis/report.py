@@ -21,6 +21,7 @@ DC2200 ramp the calibrated intensity ``current * COEFF[objective]``.
 """
 from pathlib import Path
 
+from .paths import output_root
 import numpy as np
 import pandas as pd
 
@@ -34,8 +35,9 @@ RESULT_COLUMNS = ["mean_spacing_px", "std_spacing_px", "warning", "n_lines", "fi
 # ---------------------------------------------------------------------------
 # finding the files
 # ---------------------------------------------------------------------------
-def find_results_csv(results, output_dir="output"):
+def find_results_csv(results, output_dir=None):
     """A results CSV, or the name of a photo folder analysed with 'analysis folder'."""
+    output_dir = output_root(output_dir)
     p = Path(results)
     if p.is_file():
         return p
@@ -56,13 +58,14 @@ def _photo_log_files(ramp_csv):
         return set()
 
 
-def find_ramp_csv(ramp=None, output_dir="output", files=()):
+def find_ramp_csv(ramp=None, output_dir=None, files=()):
     """The ramp CSV to use.
 
     Given: that file (or that name in <output_dir>/ramp/). Not given: the ramp
     whose photo log lists most of ``files`` (the photos of the folder), else the
     newest ramp.
     """
+    output_dir = output_root(output_dir)
     if ramp:
         p = Path(ramp)
         if not p.exists():
@@ -267,12 +270,13 @@ def plot_timeline(table, info, out_png, name="", theta="0.8wt", px_to_um=PX_TO_U
     finish(fig, out_png)
 
 
-def main_report(name, ramp=None, results=None, output_dir="output", objective="20x",
+def main_report(name, ramp=None, results=None, output_dir=None, objective="20x",
                 theta="0.8wt", px_to_um=PX_TO_UM, camera_offset_s=0.0, liv=None):
     """Align, save and plot -> <output_dir>/report/<name>/data.csv, plots.png, timeline.png.
 
     ``results`` defaults to ``name`` (the folder name used with 'analysis folder').
     """
+    output_dir = output_root(output_dir)
     results_path = find_results_csv(results or name, output_dir)
     files = pd.read_csv(results_path)["file"].astype(str)
     ramp_path = find_ramp_csv(ramp, output_dir, files)
