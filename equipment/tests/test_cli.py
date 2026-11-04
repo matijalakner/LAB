@@ -246,7 +246,7 @@ def test_ctrl_c_message(monkeypatch):
 def test_pe300_set(calls):
     target, cfg = run(calls, "pe300", "set", "40", "--channels", "c,a", "--port", "/dev/x")
     assert target == "coolled.pe300:main_pe300_set"
-    assert cfg == {"intensity": 40, "channels": "AC", "port": "/dev/x"}
+    assert cfg == {"intensity": 40, "channels": "AC", "hold": None, "port": "/dev/x"}
 
 
 @pytest.mark.parametrize("argv,target", [
@@ -313,3 +313,24 @@ def test_liv_with_pe300(calls):
     target, cfg = run(calls, "liv", "--source", "pe300", "--channels", "ab")
     assert target == "experiments.liv:main_liv_measurement"
     assert cfg["source"] == "pe300" and cfg["i_max"] == 100 and cfg["channels"] == "AB"
+
+
+def test_pe300_ramp_with_hold(calls):
+    _, cfg = run(calls, "pe300", "ramp", "--channels", "B", "--hold", "c=1", "--min", "0",
+                 "--max", "100", "--step", "1", "--step-time", "5")
+    assert cfg["channels"] == "B" and cfg["hold"] == "C=1"
+
+
+@pytest.mark.parametrize("argv", [
+    ["pe300", "ramp", "--channels", "B", "--hold", "B=1", "--min", "0", "--max", "10",
+     "--step", "1", "--step-time", "1"],                       # held and ramped
+    ["pe300", "ramp", "--hold", "C=1", "--min", "0", "--max", "10", "--step", "1",
+     "--step-time", "1"],                                       # default channels ABC
+    ["pe300", "set", "10", "--channels", "B", "--hold", "C=200"],
+    ["pe300", "set", "10", "--channels", "B", "--hold", "C"],
+    ["liv", "--source", "dc2200", "--hold", "C=1"],
+])
+def test_pe300_hold_invalid(calls, argv):
+    with pytest.raises(SystemExit) as e:
+        cli.main(argv)
+    assert e.value.code == 2 and calls == []

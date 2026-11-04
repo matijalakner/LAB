@@ -176,6 +176,9 @@ def add_pe300_options(parser, channels=True):
         g.add_argument("--channels", default=None, metavar="ABC",
                        help="channels to light, any of A B C, e.g. ABC (white, default), "
                             "B or AC; the others are switched off")
+        g.add_argument("--hold", default=None, metavar="CH=PCT",
+                       help="keep other channels on at a fixed intensity while the light "
+                            "is on, e.g. --hold C=1 or --hold A=5,C=1")
     g.add_argument("--port", default=None,
                    help="serial port, e.g. /dev/ttyACM0 or COM3 (default: "
                         "$EQUIPMENT_PE300_PORT, else found automatically)")
@@ -196,6 +199,8 @@ SOURCE_INFO = {
                "      --photos mysample --camera flir --shutter 1/250 --gain 0 --wb off",
                "equipment pe300 ramp --min 0 --max 100 --step 10 --step-time 5 --power "
                "--wavelength 470",
+               "equipment pe300 ramp --channels B --hold C=1 --min 0 --max 100 --step 1 "
+               "--step-time 5 --power",
                "equipment pe300 ramp --min 0 --max 50 --step 5 --step-time 60 --channels B "
                "\\\n      --photos s1 --power"]),
 }
@@ -512,7 +517,8 @@ def run_ramp(args, parser, key):
     if key == "dc2200":
         cfg["dc2200_serial"] = args.dc2200_serial
     else:
-        cfg.update(port=args.port, channels=_channels(args, parser))
+        channels = _channels(args, parser)
+        cfg.update(port=args.port, channels=channels, hold=_hold(args, parser, channels))
 
     # photos
     camera_opts = set(CANON_SETTINGS + FLIR_SETTINGS + FLIR_ONLY + CANON_ONLY + PHOTO_KEYS)
@@ -560,6 +566,24 @@ def _channels(args, parser):
     return "".join(c for c in "ABC" if c in text)
 
 
+def _hold(args, parser, channels):
+    """--hold C=1 -> 'C=1' (validated; None if not given)."""
+    text = getattr(args, "hold", None)
+    if not text:
+        return None
+    from .coolled.pe300 import parse_hold            # no hardware library needed
+    try:
+        hold = parse_hold(text)
+    except ValueError as e:
+        parser.error(f"--hold: {e}")
+    ramped = channels or "ABC"
+    both = set(hold) & set(ramped)
+    if both:
+        parser.error(f"--hold {''.join(sorted(both))}: that channel is already in "
+                     f"--channels {ramped}; e.g. --channels B --hold C=1")
+    return ",".join(f"{ch}={v}" for ch, v in sorted(hold.items()))
+
+
 def run_dc2200(args, parser):
     if args.action == "set":
         if args.current > 2.0:
@@ -576,9 +600,10 @@ def run_pe300(args, parser):
     if args.action == "set":
         if args.intensity > 100:
             parser.error("intensity must be <= 100 %")
+        channels = _channels(args, parser)
         return _call("coolled.pe300:main_pe300_set",
-                     {"intensity": args.intensity, "channels": _channels(args, parser),
-                      "port": args.port})
+                     {"intensity": args.intensity, "channels": channels,
+                      "hold": _hold(args, parser, channels), "port": args.port})
     if args.action == "off":
         return _call("coolled.pe300:main_pe300_off", {"port": args.port})
     if args.action == "status":
@@ -603,8 +628,8 @@ def run_liv(args, parser):
         parser.error("--max must be >= --min")
     if args.settle_time is not None and args.settle_time >= 1.0 / args.update_rate:
         parser.error("--settle-time must be shorter than 1 / --update-rate")
-    if args.source == "dc2200" and (args.port or args.channels):
-        parser.error("--port and --channels are for --source pe300")
+    if args.source == "dc2200" and (args.port or args.channels or args.hold):
+        parser.error("--port, --channels and --hold are for --source pe300")
     if args.source == "pe300" and args.dc2200_serial:
         parser.error("--dc2200-serial is for --source dc2200")
     return _call("experiments.liv:main_liv_measurement", {
@@ -612,6 +637,7 @@ def run_liv(args, parser):
                        "averaging_count", "settle_time", "dc2200_serial", "pm400_serial",
                        "port")),
         "i_min": i_min, "i_max": i_max, "channels": _channels(args, parser),
+        "hold": _hold(args, parser, _channels(args, parser)),
         "output_csv": _csv(args, "liv")})
 
 

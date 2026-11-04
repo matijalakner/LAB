@@ -75,6 +75,29 @@ def normalize_channels(channels):
     return "".join(c for c in CHANNELS if c in text)
 
 
+def parse_hold(hold):
+    """Channels kept at a fixed intensity: 'C=1', 'A=5,C=1', {'C': 1} -> {'C': 1}."""
+    if not hold:
+        return {}
+    if isinstance(hold, dict):
+        items = hold.items()
+    else:
+        items = []
+        for part in str(hold).replace(";", ",").split(","):
+            if part.strip():
+                if "=" not in part:
+                    raise ValueError(f"hold must look like C=1 or A=5,C=1, got '{hold}'")
+                ch, value = part.split("=", 1)
+                items.append((ch, value))
+    out = {}
+    for ch, value in items:
+        c = normalize_channels(str(ch).strip())
+        if len(c) != 1:
+            raise ValueError(f"hold: one channel per value, e.g. C=1 (got '{ch}')")
+        out[c] = check_intensity(value)
+    return out
+
+
 def check_intensity(value):
     v = float(value)
     if not 0 <= v <= 100:
@@ -303,16 +326,23 @@ class PE300:
                                    "(is the Control Pod being used at the same time?)")
         return now
 
-    def set_channels(self, channels, intensity, on=True):
-        """Select ``channels`` at ``intensity`` %, on or off; deselect the others
-        (their intensity setting is kept)."""
+    def set_channels(self, channels, intensity, on=True, hold=None):
+        """Select ``channels`` at ``intensity`` %, on or off. ``hold`` ({'C': 1})
+        keeps other channels at their own fixed intensity, on/off together with
+        ``channels``; all remaining channels are deselected (intensity kept)."""
         channels = normalize_channels(channels)
         intensity = check_intensity(intensity)
+        hold = parse_hold(hold)
+        both = set(hold) & set(channels)
+        if both:
+            raise ValueError(f"channel {''.join(sorted(both))} cannot be ramped and held")
         current = self.status()
         states = {}
         for ch, c in current.items():
             if ch in channels:
                 states[ch] = Channel(True, on, intensity)
+            elif ch in hold:
+                states[ch] = Channel(True, on, hold[ch])
             else:
                 states[ch] = Channel(False, False, c.intensity)
         return self.apply(states)
@@ -341,7 +371,9 @@ class PE300:
 # ---------------------------------------------------------------------------
 class PE300Source(LightSource):
     """pE-300 as a light source: the level is the intensity in % of the chosen
-    channels (all at the same value); the other channels are switched off."""
+    channels (all at the same value). Channels in ``hold`` stay at their own
+    fixed intensity whenever the light is on (e.g. ramp B, hold C at 1 %);
+    the other channels are switched off."""
 
     key = "pe300"
     name = "pE-300"
@@ -349,8 +381,13 @@ class PE300Source(LightSource):
     column = "intensity_pct"
     max_level = 100
 
-    def __init__(self, port=None, channels=CHANNELS):
+    def __init__(self, port=None, channels=CHANNELS, hold=None):
         self.channels = normalize_channels(channels)
+        self.hold = parse_hold(hold)
+        both = set(self.hold) & set(self.channels)
+        if both:
+            raise ValueError(f"channel {''.join(sorted(both))} cannot be ramped and held; "
+                             "choose other --channels")
         self.port = port
         self.dev = None
         self._level = 0
@@ -359,11 +396,14 @@ class PE300Source(LightSource):
     @classmethod
     def from_cfg(cls, cfg):
         get = read_cfg(cfg)
-        return cls(port=get("port"), channels=get("channels") or CHANNELS)
+        return cls(port=get("port"), channels=get("channels") or CHANNELS,
+                   hold=get("hold"))
 
     def open(self):
         self.dev = PE300(self.port).open()
-        print(f"pE-300 on {self.dev.port}, channels {self.channels}.")
+        held = ", ".join(f"{ch} held at {v} %" for ch, v in sorted(self.hold.items()))
+        print(f"pE-300 on {self.dev.port}, channels {self.channels}"
+              + (f"; {held}" if held else "") + ".")
         return self
 
     def close(self):
@@ -376,11 +416,11 @@ class PE300Source(LightSource):
 
     def set_level(self, level):
         self._level = self.check_level(level, "intensity")
-        self.dev.set_channels(self.channels, self._level, on=self._on)
+        self.dev.set_channels(self.channels, self._level, on=self._on, hold=self.hold)
 
     def switch_on(self):
         self._on = True
-        self.dev.set_channels(self.channels, self._level, on=True)
+        self.dev.set_channels(self.channels, self._level, on=True, hold=self.hold)
 
     def switch_off(self):
         self._on = False
@@ -397,7 +437,8 @@ class PE300Source(LightSource):
 def main_pe300_set(cfg):
     """Set ``intensity`` (%) on ``channels`` (default ABC) and LEAVE THE LIGHT ON.
 
-    cfg: intensity; optional channels, port. 0 switches the light off.
+    cfg: intensity; optional channels, port, hold (e.g. 'C=1': channel C stays at
+    1 %). 0 switches the light off.
     """
     get = read_cfg(cfg)
     if get("intensity") is None:
@@ -410,7 +451,8 @@ def main_pe300_set(cfg):
         light.set_level(intensity)
         light.switch_on()
         light.leave_on = True
-        print(f"pE-300 ON: channels {light.channels} at {intensity} %.")
+        held = "".join(f", {ch} at {v} %" for ch, v in sorted(light.hold.items()))
+        print(f"pE-300 ON: channels {light.channels} at {intensity} %{held}.")
 
 
 def main_pe300_off(cfg=None):

@@ -358,3 +358,43 @@ def test_devices_lists_one_unit_once(fake_serial, monkeypatch):
     same = _ports(("/dev/ttyACM1", "0000", "3-9:1.2"), ("/dev/ttyACM0", "0000", "3-9:1.0"))
     monkeypatch.setattr(mod.tools.list_ports, "comports", lambda: same)
     assert devices.probe_pe300() == [("CoolLED pE-300", "ports /dev/ttyACM0, /dev/ttyACM1")]
+
+
+def test_parse_hold():
+    assert pe300.parse_hold("c=1") == {"C": 1}
+    assert pe300.parse_hold("A=5, C=1") == {"A": 5, "C": 1}
+    assert pe300.parse_hold({"C": 2.4}) == {"C": 2}
+    assert pe300.parse_hold(None) == {}
+    for bad in ("C", "D=1", "AB=1", "C=101"):
+        with pytest.raises(ValueError):
+            pe300.parse_hold(bad)
+
+
+def test_ramp_blue_with_green_held_at_1(fake_serial, tmp_path):
+    seen = []
+    original = FakePE300Port._handle
+
+    def spy(self, cmd):
+        out = original(self, cmd)
+        if cmd.startswith("CSS") and cmd != "CSS?":
+            seen.append(dict(self.lit()))
+        return out
+    FakePE300Port._handle = spy
+    try:
+        cli.main(["pe300", "ramp", "--channels", "B", "--hold", "C=1", "--min", "0",
+                  "--max", "2", "--step", "1", "--step-time", "0.01",
+                  "--output-dir", str(tmp_path), "--output-csv", "r.csv"])
+    finally:
+        FakePE300Port._handle = original
+    lit = [s for s in seen if s]
+    assert all(s.get("C") == 1 for s in lit)                     # green stays at 1 %
+    assert [s["B"] for s in lit] == [0, 0, 1, 2, 1, 0]           # blue ramps
+    assert all("A" not in s for s in lit)
+    assert device(fake_serial).lit() == {}                       # everything off at the end
+
+
+def test_set_with_hold(fake_serial):
+    cli.main(["pe300", "set", "40", "--channels", "B", "--hold", "C=1"])
+    assert device(fake_serial).lit() == {"B": 40, "C": 1}
+    cli.main(["pe300", "off"])
+    assert device(fake_serial).lit() == {}

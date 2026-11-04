@@ -90,6 +90,7 @@ equipment pe300 set 30                              # white (A+B+C) at 30 %, sta
 equipment pe300 set 50 --channels B                 # blue only
 equipment pe300 off
 equipment pe300 ramp --min 0 --max 100 --step 10 --step-time 2
+equipment pe300 ramp --channels B --hold C=1 --min 0 --max 100 --step 1 --step-time 5   # blue ramp, green at 1 %
 
 # pairings
 equipment pe300 ramp --min 0 --max 100 --step 10 --step-time 5 --power --wavelength 470
@@ -143,6 +144,7 @@ Every pE-300 command takes:
 
 - `--port` (e.g. `/dev/ttyACM0`, `COM3`). The default is `$EQUIPMENT_PE300_PORT`, otherwise the port is found automatically.
 - `--channels`: any of `A`, `B`, `C`. The default is `ABC`.
+- `--hold CH=PCT` (`set`, `ramp`, `liv`): keeps other channels on at a fixed intensity while the light is on, for example `--channels B --hold C=1` ramps blue with green held at 1 %. Several values: `--hold A=5,C=1`. Held channels switch off with the light.
 
 Every setting is read back from the unit and checked. If the Control Pod changes something at the same time, you get an error instead of wrong data.
 
