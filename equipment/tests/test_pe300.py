@@ -294,20 +294,39 @@ def test_liv_with_pe300(fake_serial, fake_meter, tmp_path):
     assert device(fake_serial).lit() == {}
 
 
+def _ports(*specs):
+    return [types.SimpleNamespace(device=d, description="CoolLED pE-300", manufacturer="CoolLED",
+                                  product=None, interface=None, vid=1, pid=1,
+                                  serial_number=sn, location=None)
+            for d, sn in specs]
+
+
 def test_two_coolled_ports_the_answering_one_is_used(fake_serial, monkeypatch):
-    two = [types.SimpleNamespace(device=d, description="CoolLED pE-300", manufacturer="CoolLED",
-                                 product=None, interface=None, vid=1, pid=1)
-           for d in ("/dev/ttyACM1", "/dev/ttyACM0")]
     mod = pe300._import_serial()
+    two = _ports(("/dev/ttyACM1", "U1"), ("/dev/ttyACM0", "U2"))
     monkeypatch.setattr(mod.tools.list_ports, "comports", lambda: two)
     monkeypatch.setattr(pe300, "_probe", lambda port, timeout=0.6: port == "/dev/ttyACM0")
     assert pe300.find_port() == "/dev/ttyACM0"
     monkeypatch.setattr(pe300, "_probe", lambda port, timeout=0.6: True)
-    with pytest.raises(RuntimeError, match="more than one pE-300 answered"):
+    with pytest.raises(RuntimeError, match="different USB devices"):
         pe300.find_port()
     monkeypatch.setattr(pe300, "_probe", lambda port, timeout=0.6: False)
     with pytest.raises(RuntimeError, match="none answered"):
         pe300.find_port()
+
+
+def test_one_unit_with_two_answering_ports(fake_serial, monkeypatch):
+    mod = pe300._import_serial()
+    same = _ports(("/dev/ttyACM10", "U1"), ("/dev/ttyACM2", "U1"))
+    monkeypatch.setattr(mod.tools.list_ports, "comports", lambda: same)
+    monkeypatch.setattr(pe300, "_probe", lambda port, timeout=0.6: True)
+    assert pe300.find_port() == "/dev/ttyACM2"          # numeric order, not text order
+
+
+def test_probe_ignores_an_echo(fake_serial, monkeypatch):
+    assert pe300._probe("/dev/x", timeout=0.2) is True                       # real reply
+    monkeypatch.setattr(FakePE300Port, "_handle", lambda self, cmd: [cmd])   # echo only
+    assert pe300._probe("/dev/x", timeout=0.2) is False
 
 
 def test_channel_letter_as_port_is_refused(fake_serial):

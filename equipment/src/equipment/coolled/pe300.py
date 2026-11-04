@@ -94,14 +94,34 @@ def _import_serial():
 
 def candidate_ports():
     """[(device, description)] of serial ports that identify as CoolLED."""
+    return [(p.device, p.description or "") for p in _coolled_ports()]
+
+
+def _coolled_ports():
     serial = _import_serial()
     out = []
     for p in serial.tools.list_ports.comports():
         text = " ".join(str(x) for x in (p.description, p.manufacturer, p.product,
                                           p.interface) if x).lower()
         if any(w in text for w in _PORT_WORDS):
-            out.append((p.device, p.description or ""))
+            out.append(p)
     return out
+
+
+def _usb_unit(p):
+    """What identifies the physical USB device behind a port (None if unknown)."""
+    serial_number = getattr(p, "serial_number", None)
+    if serial_number:
+        return ("sn", getattr(p, "vid", None), getattr(p, "pid", None), serial_number)
+    location = getattr(p, "location", None)        # e.g. '1-4:1.0' -> device '1-4'
+    if location:
+        return ("loc", str(location).split(":")[0])
+    return None
+
+
+def _port_sort_key(device):
+    m = re.search(r"(\d+)$", device)
+    return (re.sub(r"\d+$", "", device), int(m.group(1)) if m else -1)
 
 
 def _probe(port, timeout=0.6):
@@ -115,8 +135,12 @@ def _probe(port, timeout=0.6):
             buf = b""
             while time.monotonic() < end:
                 buf += s.read(64)
-                if b"CSS" in buf.upper() and b"\n" in buf:
-                    return True
+                for line in buf.replace(b"\r", b"\n").split(b"\n")[:-1]:
+                    try:                               # a real status line, not an echo
+                        if len(parse_css(line.decode("ascii", "replace"))) >= 3:
+                            return True
+                    except ValueError:
+                        pass
     except (OSError, serial.SerialException) as e:
         if isinstance(e, PermissionError) or "Permission denied" in str(e) \
                 or getattr(e, "errno", None) == 13:
@@ -132,20 +156,26 @@ def find_port(port=None):
     identifies as CoolLED > the first USB serial port that answers 'CSS?'."""
     if port or os.environ.get(PORT_ENV):
         return port or os.environ[PORT_ENV]
-    named = candidate_ports()
+    named = _coolled_ports()
     if len(named) == 1:
-        return named[0][0]
+        return named[0].device
     if len(named) > 1:
         # one unit can show up as several serial ports: use the one that answers
-        answering = [d for d, _ in named if _probe(d)]
+        answering = sorted((p for p in named if _probe(p.device)),
+                           key=lambda p: _port_sort_key(p.device))
         if len(answering) == 1:
-            return answering[0]
-        ports = ", ".join(answering or [d for d, _ in named])
+            return answering[0].device
+        units = {_usb_unit(p) for p in answering}
+        if answering and len(units) == 1 and None not in units:
+            return answering[0].device          # all ports belong to the same unit
+        ports = ", ".join(p.device for p in answering) or \
+            ", ".join(p.device for p in named)
         if not answering:
             raise RuntimeError(f"CoolLED ports found ({ports}) but none answered 'CSS?'. "
                                "Is the pE-300 switched on? Is another program using it?")
-        raise RuntimeError(f"more than one pE-300 answered ({ports}); choose one with "
-                           f"--port, e.g. --port {answering[0]}")
+        raise RuntimeError(f"more than one pE-300 answered ({ports}) and they look like "
+                           "different USB devices; choose one with --port, e.g. --port "
+                           f"{answering[0].device} (or set ${PORT_ENV})")
     serial = _import_serial()
     usb = [p.device for p in serial.tools.list_ports.comports()
            if p.vid is not None or re.search(r"ttyACM|ttyUSB|usbmodem|COM\d", p.device)]
