@@ -316,7 +316,14 @@ Numbering of `<name>_XXXX` continues after the files already in the folder, so n
 ### CoolLED pE-300
 
 1. Install pyserial with `pip install -e ".[coolled]"`. The pE-300 is a USB virtual serial port (57600 baud):
-   - Linux: `/dev/ttyACM*`. Your user must be in the `dialout` group (`sudo usermod -aG dialout $USER`, then log in again).
+   - Linux: the unit shows up as two ports, `/dev/ttyACM0` and `/dev/ttyACM1` ("pE300 - USB Virtual Serial Port A/B", USB ID `0483:A080`). Both accept commands, and the program uses the first. To give your user access, either:
+     - install a udev rule, which works without logging out and survives replugging:
+       ```bash
+       echo 'SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a080", MODE="0666"' \
+           | sudo tee /etc/udev/rules.d/99-coolled-pe300.rules
+       sudo udevadm control --reload-rules && sudo udevadm trigger
+       ```
+     - or join the `dialout` group with `sudo usermod -aG dialout $USER`, then log out and back in.
    - Windows: a `COM` port. Windows needs `CoolLEDpE.inf` from coolled.com.
 2. The port is found automatically when it identifies as CoolLED. Otherwise every USB serial port is asked `CSS?`. Fix it with `--port` or `EQUIPMENT_PE300_PORT=/dev/ttyACM0` if other serial devices are connected.
 3. Check with `equipment pe300 status`.
