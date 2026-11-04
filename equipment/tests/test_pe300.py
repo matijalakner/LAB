@@ -314,3 +314,14 @@ def test_channel_letter_as_port_is_refused(fake_serial):
     with pytest.raises(SystemExit) as e:
         cli.main(["pe300", "set", "30", "--port", "B"])
     assert "not a serial port" in str(e.value.code)
+
+
+def test_permission_denied_is_reported(fake_serial, monkeypatch):
+    def denied(*a, **k):
+        raise PermissionError(13, "Permission denied: '/dev/ttyACM7'")
+    monkeypatch.setattr(FakePE300Port, "__init__", denied)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["pe300", "status", "--port", "/dev/ttyACM7"])
+    assert "dialout" in str(e.value.code)
+    with pytest.raises(PermissionError, match="dialout"):
+        pe300._probe("/dev/ttyACM7")

@@ -117,7 +117,12 @@ def _probe(port, timeout=0.6):
                 buf += s.read(64)
                 if b"CSS" in buf.upper() and b"\n" in buf:
                     return True
-    except (OSError, serial.SerialException):
+    except (OSError, serial.SerialException) as e:
+        if isinstance(e, PermissionError) or "Permission denied" in str(e) \
+                or getattr(e, "errno", None) == 13:
+            raise PermissionError(
+                f"permission denied for {port}: add your user to the 'dialout' group "
+                "(sudo usermod -aG dialout $USER), then log out and back in") from e
         return False
     return False
 
@@ -179,8 +184,12 @@ class PE300:
         try:
             self.ser = serial.Serial(self.port, BAUD, timeout=0.05, write_timeout=1.0)
         except serial.SerialException as e:
+            if "Permission denied" in str(e) or getattr(e, "errno", None) == 13:
+                raise RuntimeError(
+                    f"permission denied for {self.port}: add your user to the 'dialout' "
+                    "group (sudo usermod -aG dialout $USER), then log out and back in") from e
             raise RuntimeError(f"could not open {self.port}: {e} (is another program "
-                               "using it? Linux: is your user in the 'dialout' group?)") from e
+                               "using it?)") from e
         try:
             self.status()
         except Exception as e:
