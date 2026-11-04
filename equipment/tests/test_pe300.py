@@ -295,15 +295,16 @@ def test_liv_with_pe300(fake_serial, fake_meter, tmp_path):
 
 
 def _ports(*specs):
-    return [types.SimpleNamespace(device=d, description="CoolLED pE-300", manufacturer="CoolLED",
-                                  product=None, interface=None, vid=1, pid=1,
-                                  serial_number=sn, location=None)
-            for d, sn in specs]
+    """(device, serial_number, location) as the real pE-300 reports them."""
+    return [types.SimpleNamespace(device=d, description="pE300 - USB Virtual Serial Port",
+                                  manufacturer=None, product=None, interface=None,
+                                  vid=0x0483, pid=0xA080, serial_number=sn, location=loc)
+            for d, sn, loc in specs]
 
 
 def test_two_coolled_ports_the_answering_one_is_used(fake_serial, monkeypatch):
     mod = pe300._import_serial()
-    two = _ports(("/dev/ttyACM1", "U1"), ("/dev/ttyACM0", "U2"))
+    two = _ports(("/dev/ttyACM1", "0000", "3-9:1.0"), ("/dev/ttyACM0", "0000", "3-10:1.0"))
     monkeypatch.setattr(mod.tools.list_ports, "comports", lambda: two)
     monkeypatch.setattr(pe300, "_probe", lambda port, timeout=0.6: port == "/dev/ttyACM0")
     assert pe300.find_port() == "/dev/ttyACM0"
@@ -317,10 +318,15 @@ def test_two_coolled_ports_the_answering_one_is_used(fake_serial, monkeypatch):
 
 def test_one_unit_with_two_answering_ports(fake_serial, monkeypatch):
     mod = pe300._import_serial()
-    same = _ports(("/dev/ttyACM10", "U1"), ("/dev/ttyACM2", "U1"))
+    # the real unit: one USB device, "Virtual Serial Port A" and "B"
+    same = _ports(("/dev/ttyACM10", "0000", "3-9:1.2"), ("/dev/ttyACM2", "0000", "3-9:1.0"))
     monkeypatch.setattr(mod.tools.list_ports, "comports", lambda: same)
     monkeypatch.setattr(pe300, "_probe", lambda port, timeout=0.6: True)
     assert pe300.find_port() == "/dev/ttyACM2"          # numeric order, not text order
+    no_loc = _ports(("/dev/ttyACM0", "0000", None), ("/dev/ttyACM1", "0000", None))
+    monkeypatch.setattr(mod.tools.list_ports, "comports", lambda: no_loc)
+    with pytest.raises(RuntimeError, match="different USB devices"):
+        pe300.find_port()                              # 0000 alone proves nothing
 
 
 def test_probe_ignores_an_echo(fake_serial, monkeypatch):

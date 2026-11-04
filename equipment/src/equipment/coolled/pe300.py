@@ -109,13 +109,18 @@ def _coolled_ports():
 
 
 def _usb_unit(p):
-    """What identifies the physical USB device behind a port (None if unknown)."""
-    serial_number = getattr(p, "serial_number", None)
-    if serial_number:
-        return ("sn", getattr(p, "vid", None), getattr(p, "pid", None), serial_number)
-    location = getattr(p, "location", None)        # e.g. '1-4:1.0' -> device '1-4'
+    """What identifies the physical USB device behind a port (None if unknown).
+
+    The USB location comes first ('3-9:1.0' and '3-9:1.2' are interfaces of the
+    same device '3-9'): the pE-300 reports the generic serial number 0000, so
+    two units cannot be told apart by it.
+    """
+    location = getattr(p, "location", None)
     if location:
         return ("loc", str(location).split(":")[0])
+    serial_number = getattr(p, "serial_number", None)
+    if serial_number and serial_number.strip("0"):
+        return ("sn", getattr(p, "vid", None), getattr(p, "pid", None), serial_number)
     return None
 
 
