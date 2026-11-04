@@ -412,6 +412,29 @@ class FlirCamera:
         self.dev.start(buffers=buffers, newest_only=False)
         self.mode = "video"
 
+    def start_live_mode(self, buffers=4):
+        """Free-running acquisition that always hands out the NEWEST frame (preview)."""
+        if self.mode == "live":
+            return
+        self.stop()
+        self._try_set("AcquisitionMode", "Continuous")
+        self._try_set("TriggerMode", "Off")
+        self.dev.start(buffers=buffers, newest_only=True)
+        self.mode = "live"
+
+    def set_live(self, name, value):
+        """Change a feature while streaming (ExposureTime and Gain can be); if the
+        camera refuses, restart the stream around the change. Returns the value read back."""
+        try:
+            self.set(name, value)
+        except (RuntimeError, ValueError):
+            mode = self.mode
+            self.stop()
+            self.set(name, value)
+            if mode == "live":
+                self.start_live_mode()
+        return self.get(name)
+
     def stop(self):
         if self.dev is not None and self.mode is not None:
             self.dev.stop()

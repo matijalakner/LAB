@@ -53,6 +53,7 @@ _EXPORTS = {
     "main_flir_photo": "flir.capture",
     "main_flir_timelapse": "flir.capture",
     "main_flir_video": "flir.capture",
+    "main_flir_live": "flir.capture",
     # combined
     "main_ramp_camera": "experiments.ramp_camera",
     "photo_times": "experiments.ramp_camera",

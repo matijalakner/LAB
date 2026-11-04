@@ -8,7 +8,7 @@ Drivers and terminal control for the lab equipment:
 | CoolLED **pE-300** white/ultra (%) | `equipment pe300 set / off / status / ramp` | `equipment.coolled.pe300` |
 | Thorlabs **PM400** power meter | `equipment pm400 measure` | `equipment.thorlabs.pm400` |
 | **Canon EOS R10** (USB, libgphoto2) | `equipment canon info / photo / timelapse / video` | `equipment.canon` |
-| **FLIR Blackfly S** BFS-U3-27S5C-C (USB3 Vision) | `equipment flir list / info / photo / timelapse / video` | `equipment.flir` |
+| **FLIR Blackfly S** BFS-U3-27S5C-C (USB3 Vision) | `equipment flir list / info / live / photo / timelapse / video` | `equipment.flir` |
 | Any light source + photos and/or power | `equipment <dc2200\|pe300> ramp ... --photos NAME --power` | `equipment.experiments.paired_ramp` |
 | Any light source + PM400 (LIV curve) | `equipment liv --source <dc2200\|pe300>` | `equipment.experiments.liv` |
 | What is connected | `equipment devices` | `equipment.devices` |
@@ -245,6 +245,7 @@ Settings are all optional; any you leave out keep the value set on the camera. E
 |---|---|
 | `flir list [--backend]` | Connected cameras with serial numbers. |
 | `flir info [--serial] [--backend]` | Current settings with their allowed values or ranges. |
+| `flir live [NAME]` | Live view in a window, showing frame rate, exposure, gain and % saturated pixels. Keys: `+`/`-` exposure, `]`/`[` gain, `o` marks saturated pixels red, `c` crosshair, `s` saves a full-resolution snapshot to `input/folder/NAME/`, `q` quits. On exit it prints the `--shutter`/`--gain` values to reuse in other commands. |
 | `flir photo NAME [-i]` | One photo, software-triggered (a fresh exposure). |
 | `flir timelapse NAME -n S [--count N \| --duration S]` | A photo every `S` s. |
 | `flir video NAME [--duration S] [--fps F] [--codec mp4v]` | Records the stream to `.mp4` on the computer. A `_frames.csv` file holds the real time of every frame. |

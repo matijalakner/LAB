@@ -6,7 +6,7 @@
     equipment pm400  measure                           Thorlabs PM400 power meter
     equipment liv    --source {dc2200, pe300}          light ramp + PM400 power log
     equipment canon  {info, photo, timelapse, video}   Canon EOS R10
-    equipment flir   {list, info, photo, timelapse, video}
+    equipment flir   {list, info, live, photo, timelapse, video}
                                                        FLIR Blackfly S
 
 Pairing: every light source's ramp can be combined with any measurement:
@@ -445,6 +445,23 @@ def build_parser():
     add_flir_settings(ft)
     add_output_options(ft, "camera", prefix="flir")
 
+    flv = _cmd(fc, "live", "Show the live camera stream in a window: exposure, gain, "
+                           "frame rate and saturation shown; keys change exposure (+/-) "
+                           "and gain (]/[), mark saturated pixels (o), save snapshots (s).",
+               epilog="examples:\n"
+                      "  equipment flir live\n"
+                      "  equipment flir live mysample --shutter 1/250 --gain 0 --wb off\n"
+                      "  (keys: q quit, s snapshot, +/- exposure, ]/[ gain, o saturation, "
+                      "c crosshair)")
+    flv.add_argument("name", nargs="?", default="live",
+                     help="prefix of the snapshots, saved as "
+                          "<input-dir>/folder/<name>/<name>_XXXX.jpg (default: live)")
+    flv.add_argument("--input-dir", default="input", metavar="DIR",
+                     help="root folder for the snapshots (default: input)")
+    flv.add_argument("--width", type=_positive_int, default=1280, metavar="PX",
+                     help="window width in pixels (default: 1280; the window can be resized)")
+    add_flir_settings(flv)
+
     fv = _cmd(fc, "video", "Record the stream to an .mp4 on the computer.")
     add_name_options(fv)
     fv.add_argument("--duration", type=_positive_float, default=None, metavar="S",
@@ -623,10 +640,14 @@ def run_flir(args, parser):
                      {"serial": args.serial, "backend": args.backend or "auto"})
     cfg = {"name": args.name, "input_dir": args.input_dir,
            **_pick(args, FLIR_SETTINGS + ("serial", "backend")),
-           "output_csv": _csv(args, "camera", prefix="flir")}
+           "output_csv": _csv(args, "camera", prefix="flir") if args.action != "live" else None}
     cfg["backend"] = cfg["backend"] or "auto"
     cfg["save_format"] = cfg["save_format"] or "jpg"
     cfg["quality"] = cfg["quality"] or 95
+    if args.action == "live":
+        cfg.pop("output_csv", None)
+        cfg["width"] = args.width
+        return _call("flir.capture:main_flir_live", cfg)
     if args.action == "photo":
         cfg["interactive"] = args.interactive
         return _call("flir.capture:main_flir_photo", cfg)

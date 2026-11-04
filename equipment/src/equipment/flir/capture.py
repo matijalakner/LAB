@@ -13,13 +13,14 @@ camera can drop frames and then the video's nominal frame rate is not exact.
 import csv
 import threading
 import time
+from datetime import datetime
 
 import cv2
 
 from ..capture import CaptureLog, _report, capture_folder, next_index, numbered_path
 from ..utils import read_cfg as _read_cfg
 from ..utils import utc_timestamp
-from .camera import FlirCamera, list_cameras, to_bgr
+from .camera import FlirCamera, list_cameras, make_exif, save_image, to_bgr
 
 SETTING_KEYS = ("shutter", "gain", "whitebalance", "wb_red", "wb_blue", "gamma",
                 "black_level", "pixel_format", "fps", "defaults")
@@ -267,3 +268,132 @@ def _wait_enter():
         input()
     except EOFError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# live view
+# ---------------------------------------------------------------------------
+LIVE_HELP = """Live view keys (click the window first):
+  q / Esc   quit                      s   save a snapshot (full resolution)
+  + / -     exposure x1.25 / /1.25    ] / [   gain +1 / -1 dB
+  o         show saturated pixels red c   crosshair
+  h         this help"""
+
+
+def _live_display(img, max_width):
+    """8-bit BGR copy for the screen, scaled to max_width."""
+    if img.dtype != "uint8":
+        img = (img >> 8).astype("uint8")
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    h, w = img.shape[:2]
+    if max_width and w > max_width:
+        img = cv2.resize(img, (max_width, int(round(h * max_width / w))),
+                         interpolation=cv2.INTER_AREA)
+    return img
+
+
+def _clamp(cam, name, value):
+    b = cam.dev.bounds(name)
+    return min(max(value, b[0]), b[1]) if b else value
+
+
+def main_flir_live(cfg=None):
+    """Show the camera stream in a window, with exposure/gain readout and keys to
+    change them, mark saturated pixels and save snapshots.
+
+    cfg: optional name (snapshot prefix, default 'live'), input_dir, width
+    (window width in px, default 1280), and the camera settings as for photos.
+    Snapshots go to <input_dir>/folder/<name>/<name>_XXXX.<save_format>.
+    Returns the list of saved snapshots.
+    """
+    get = _read_cfg(cfg or {})
+    name = get("name") or "live"
+    folder = capture_folder(name, get("input_dir") or "input")
+    width = int(get("width") or 1280)
+    win = "FLIR live  (q = quit, h = help)"
+    saved = []
+    with _connect(get, mode=None) as cam:
+        cam.start_live_mode()
+        try:
+            cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+        except cv2.error as e:
+            raise RuntimeError(
+                "OpenCV cannot open a window here (no GUI support). Install the normal "
+                "OpenCV: pip uninstall -y opencv-python-headless && pip install "
+                "opencv-python. On Wayland, if the window does not appear, run with "
+                "QT_QPA_PLATFORM=xcb.") from e
+        print(LIVE_HELP)
+        overlay = cross = False
+        n, t_fps, fps = 0, time.monotonic(), 0.0
+        try:
+            while True:
+                frame = cam.grab(timeout_s=cam.exposure_s() + 3.0)
+                img = to_bgr(frame)
+                full = 65535 if img.dtype != "uint8" else 255
+                sat = (img >= full).any(axis=2) if img.ndim == 3 else (img >= full)
+                sat_pct = 100.0 * float(sat.mean())
+                show = _live_display(img, width)
+                if overlay and sat.any():
+                    small = cv2.resize(sat.astype("uint8"), show.shape[1::-1],
+                                       interpolation=cv2.INTER_NEAREST).astype(bool)
+                    show[small] = (0, 0, 255)
+                if cross:
+                    h, w = show.shape[:2]
+                    cv2.line(show, (w // 2, 0), (w // 2, h), (0, 255, 0), 1)
+                    cv2.line(show, (0, h // 2), (w, h // 2), (0, 255, 0), 1)
+                n += 1
+                now = time.monotonic()
+                if now - t_fps >= 1.0:
+                    fps, n, t_fps = n / (now - t_fps), 0, now
+                exp, gain = cam.get("ExposureTime"), cam.get("Gain")
+                text = (f"{fps:4.1f} fps   exposure {exp / 1000:.3g} ms   gain {gain:.1f} dB"
+                        f"   max {int(img.max())}   saturated {sat_pct:.2f} %")
+                for color, thick in (((0, 0, 0), 3), ((255, 255, 255), 1)):
+                    cv2.putText(show, text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                                color, thick, cv2.LINE_AA)
+                cv2.imshow(win, show)
+                key = cv2.waitKey(1) & 0xFF
+                if key in (ord("q"), 27) or cv2.getWindowProperty(
+                        win, cv2.WND_PROP_VISIBLE) < 1:
+                    break
+                try:
+                    if key in (ord("+"), ord("=")):
+                        cam._try_set("ExposureAuto", "Off")
+                        cam.set_live("ExposureTime", _clamp(cam, "ExposureTime", exp * 1.25))
+                    elif key == ord("-"):
+                        cam._try_set("ExposureAuto", "Off")
+                        cam.set_live("ExposureTime", _clamp(cam, "ExposureTime", exp / 1.25))
+                    elif key in (ord("]"), ord("[")):
+                        cam._try_set("GainAuto", "Off")
+                        cam.set_live("Gain", _clamp(cam, "Gain",
+                                                    gain + (1 if key == ord("]") else -1)))
+                    elif key == ord("o"):
+                        overlay = not overlay
+                    elif key == ord("c"):
+                        cross = not cross
+                    elif key == ord("h"):
+                        print(LIVE_HELP)
+                    elif key == ord("s"):
+                        dest = numbered_path(folder, name, next_index(folder, name),
+                                             cam.photo_suffix)
+                        when = datetime.now().astimezone()
+                        save_image(img, dest, exif=make_exif(
+                            when, cam.model, cam.serial, exp, gain), quality=cam.quality)
+                        saved.append(dest)
+                        print(f"  saved {dest}")
+                except (RuntimeError, ValueError) as e:
+                    print(f"  {e}")
+        except KeyboardInterrupt:
+            pass
+        finally:
+            cam.stop()
+            cv2.destroyWindow(win)
+            cv2.waitKey(1)
+        exp, gain = cam.get("ExposureTime"), cam.get("Gain")
+        if exp is not None and gain is not None:
+            print(f"Last settings - use them in other commands with:\n"
+                  f"  --shutter {exp:.0f}us --gain {gain:.1f}")
+    if saved:
+        print(f"{len(saved)} snapshot(s) in '{folder}/'.")
+    return saved
