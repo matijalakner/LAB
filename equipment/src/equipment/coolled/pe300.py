@@ -30,6 +30,7 @@ CHANNELS = "ABC"
 PORT_ENV = "EQUIPMENT_PE300_PORT"
 _CSS_ITEM = re.compile(r"([ABCD])([SX])([NF])(\d{1,3})")
 _PORT_WORDS = ("coolled", "pe-300", "pe300")
+USB_ID = (0x0483, 0xA080)        # the pE-300's virtual serial ports (Linux and Windows)
 
 
 @dataclass(frozen=True)
@@ -126,7 +127,9 @@ def _coolled_ports():
     for p in serial.tools.list_ports.comports():
         text = " ".join(str(x) for x in (p.description, p.manufacturer, p.product,
                                           p.interface) if x).lower()
-        if any(w in text for w in _PORT_WORDS):
+        # Windows names the ports "USB Serial Device (COMx)": the USB ID still tells
+        if any(w in text for w in _PORT_WORDS) or \
+                (getattr(p, "vid", None), getattr(p, "pid", None)) == USB_ID:
             out.append(p)
     return out
 
@@ -205,16 +208,19 @@ def find_port(port=None):
                            "different USB devices; choose one with --port, e.g. --port "
                            f"{answering[0].device} (or set ${PORT_ENV})")
     serial = _import_serial()
-    usb = [p.device for p in serial.tools.list_ports.comports()
+    usb = [p for p in serial.tools.list_ports.comports()
            if p.vid is not None or re.search(r"ttyACM|ttyUSB|usbmodem|COM\d", p.device)]
-    found = [d for d in usb if _probe(d)]
+    found = sorted((p for p in usb if _probe(p.device)), key=lambda p: _port_sort_key(p.device))
     if len(found) == 1:
-        return found[0]
+        return found[0].device
     if not found:
         raise RuntimeError("no pE-300 found. Check the USB cable and power, that your "
                            "user may open serial ports (Linux: group 'dialout'), and give "
                            f"the port with --port or ${PORT_ENV} (e.g. /dev/ttyACM0, COM3).")
-    raise RuntimeError("more than one pE-300 answered (" + ", ".join(found)
+    units = {_usb_unit(p) for p in found}
+    if len(units) == 1 and None not in units:
+        return found[0].device                  # the ports of one unit
+    raise RuntimeError("more than one pE-300 answered (" + ", ".join(p.device for p in found)
                        + "); choose one with --port")
 
 

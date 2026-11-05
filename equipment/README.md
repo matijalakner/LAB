@@ -40,30 +40,72 @@ The code was split out of [LineTracker](https://github.com/matijalakner/LineTrac
 
 ## Installation
 
-Requires Python 3.10 or newer. The core and the CLI need only the standard library. You install the extra for each instrument you use:
+There is one installer per system. Each installs everything every instrument needs, then runs `equipment doctor` to check the result. Both can be run again at any time.
+
+| | Fedora | Windows 10/11 |
+|---|---|---|
+| Run | `./install.sh` in `LAB` | `install.bat` in `LAB` (double-click) |
+| Script | `equipment/packaging/fedora/install.sh` | `equipment/packaging/windows/install.ps1` |
+| Then | `source LAB/setup.sh` in each new terminal | the **LAB terminal** shortcut on the desktop |
+| DC2200, PM400 | ✓ (pyvisa-py over libusb, udev rule) | ✓ (NI-VISA from the Thorlabs software) |
+| pE-300 | ✓ (`/dev/ttyACM*`, udev rule) | ✓ (`COM` port, built-in driver) |
+| FLIR Blackfly S | ✓ (Aravis 0.8, built by the installer) | ✓ (Spinnaker SDK + PySpin) |
+| Canon EOS R10 | ✓ (libgphoto2) | ✗ (libgphoto2 is Linux/macOS only) |
+
+### Fedora
 
 ```bash
 git clone https://github.com/matijalakner/LAB.git
-cd LAB                                         # one environment for everything: LAB/lab
-python3 -m venv --system-site-packages lab     # system site packages: needed for Aravis (FLIR)
-source lab/bin/activate
-cd equipment
-pip install -e ".[thorlabs]"        # DC2200, PM400, LIV:  pyusb, pyvisa, pyvisa-py
-pip install -e ".[coolled]"         # pE-300:              pyserial
-pip install -e ".[canon]"           # Canon:               python-gphoto2 (needs libgphoto2)
-pip install -e ".[flir]"            # FLIR:                numpy, opencv-python, pillow
-pip install -e ".[all]"             # everything above
-equipment --help
+cd LAB
+./install.sh                 # options: --no-canon, --no-aravis, --mask-gvfs, --help
+source setup.sh              # in every new terminal
 ```
 
-Two things cannot come from PyPI:
+Run it as your normal user, not with `sudo`; it asks for your password when it needs root. It does the following:
 
-- The **DC2200** driver comes from the separate `measurement_control` package. Install it into the same environment.
-- The **FLIR** camera also needs Spinnaker + PySpin, or Aravis. See [FLIR setup](#flir-blackfly-s).
+1. installs the system packages with dnf (Python, libusb, libgphoto2, the build tools);
+2. builds Aravis 0.8.36 into `/usr/local` for the FLIR camera, if Aravis 0.8 isn't there yet;
+3. installs `99-lab-equipment.rules` in `/etc/udev/rules.d/`, so the DC2200, PM400, pE-300 and FLIR open without `sudo`;
+4. adds you to `dialout` and sets the 1000 MB USB buffer the camera needs (now, and after every reboot);
+5. creates the environment `LAB/lab` (with `--system-site-packages`, for Aravis) and installs `equipment` and `line-analysis` in it.
 
-Every hardware library is loaded only when its instrument is used. `equipment --help` and every instrument you have installed work even if the others are missing; the missing ones give a clear error.
+Log out and back in once, and reboot once, when it's done.
 
-`python -m equipment ...` works the same as `equipment ...`.
+### Windows
+
+1. Install the manufacturer software first. These bring the drivers, which aren't allowed to be redistributed:
+   - **Thorlabs DC2200** software and **Optical Power Monitor** (PM400) from thorlabs.com. They install NI-VISA, which `equipment` uses for both instruments. In Thorlabs' *Power Meter Driver Switcher*, the PM400 must use the **TLPM (VISA)** driver.
+   - **Spinnaker SDK** (Windows, 64-bit) from teledynevisionsolutions.com (free account). Also download the **Spinnaker Python** package for your Python version (e.g. cp312) and leave the `.zip` or `.whl` in Downloads.
+2. Get `LAB` (`git clone https://github.com/matijalakner/LAB.git`, or *Download ZIP* on GitHub and unpack it), then double-click **`install.bat`** in `LAB`.
+
+The installer does the following:
+
+1. finds Python 3.10–3.12, the versions PySpin exists for (the Spinnaker wheel decides which), or installs it with `winget`;
+2. creates `LAB\lab` with `equipment` and `line-analysis`;
+3. checks NI-VISA;
+4. installs PySpin from the wheel in Downloads;
+5. makes `LAB\lab-terminal.cmd` and a **LAB terminal** shortcut on the desktop;
+6. runs `equipment doctor`.
+
+It needs no administrator rights. If something was missing (e.g. the Spinnaker wheel), add it and run `install.bat` again. Options: `install.bat -Python 3.11`, `install.bat -SpinnakerWheel C:\path\spinnaker_python-...whl`.
+
+### Checking: `equipment doctor`
+
+`equipment doctor` checks every library, driver and permission the instruments need on this computer and lists the connected instruments. Each line is `OK`, `WARN` (works, but may cause trouble), `FAIL` (that instrument cannot be used yet) or `--` (not used on this system). Every `WARN` and `FAIL` line comes with the fix. It changes nothing and switches nothing on.
+
+### By hand
+
+Requires Python 3.10 or newer. The core and the CLI need only the standard library; install the extra for each instrument you use:
+
+```bash
+pip install -e ".[thorlabs]"        # DC2200, PM400, LIV:  pyvisa, pyvisa-py (+ pyusb on Linux)
+pip install -e ".[coolled]"         # pE-300:              pyserial
+pip install -e ".[canon]"           # Canon:               python-gphoto2 (Linux/macOS)
+pip install -e ".[flir]"            # FLIR:                numpy, opencv-python, pillow
+pip install -e ".[all]"             # everything above
+```
+
+The FLIR camera also needs Spinnaker + PySpin, or Aravis. Neither comes from PyPI; see [FLIR setup](#flir-blackfly-s). Every hardware library is loaded only when its instrument is used, so `equipment --help` and every installed instrument work even if the others are missing. `python -m equipment ...` works the same as `equipment ...`.
 
 ---
 
@@ -321,8 +363,13 @@ Numbering of `<name>_XXXX` continues after the files already in the folder, so n
    - by changing the defaults in `src/equipment/thorlabs/common.py`.
 
    `equipment devices` shows the connected serials and the configured resources.
-2. The modules detach the Linux kernel driver while they run and re-attach it afterwards. This needs `pyusb` and USB permissions: a udev rule for vendor `1313`, or `sudo`.
-3. The DC2200 needs the `measurement_control` package. The PM400 is driven directly over SCPI with `pyvisa-py`.
+2. How they are reached:
+   - **Fedora**: through `pyvisa-py` over libusb. The Linux kernel driver is detached while an instrument is open and attached again afterwards. This needs `pyusb` and USB permissions; the installer's udev rule for vendor `1313` gives them.
+   - **Windows**: through the VISA library the Thorlabs software installs (NI-VISA). If the resource name differs (hex vs decimal IDs), the instrument is found by its serial number.
+   - `EQUIPMENT_VISA=@py` (or `@ivi`, or a VISA library path) overrides the choice.
+3. Both instruments are driven directly over SCPI.
+   - **DC2200**: a built-in driver (`SOURce1:MODe CC`, `SOURce1:CURRent:LIMit:AMPLitude`, `SOURce1:CCURrent:CURRent`, `OUTPut1:STATe`). Every setting is read back and the instrument's error queue is checked, so a refused command stops the run before the LED is switched on. On Linux, the lab's `measurement_control` package is used instead when it is installed (`EQUIPMENT_DC2200_DRIVER=auto|builtin|measurement_control`).
+   - **PM400**: a built-in driver as well.
 
 ### CoolLED pE-300
 
@@ -335,39 +382,39 @@ Numbering of `<name>_XXXX` continues after the files already in the folder, so n
        sudo udevadm control --reload-rules && sudo udevadm trigger
        ```
      - or join the `dialout` group with `sudo usermod -aG dialout $USER`, then log out and back in.
-   - Windows: a `COM` port. Windows needs `CoolLEDpE.inf` from coolled.com.
+   - Windows: one or two `COM` ports. Windows 10/11 has the USB serial driver built in (older Windows: `CoolLEDpE.inf` from coolled.com).
 2. The port is found automatically when it identifies as CoolLED. Otherwise every USB serial port is asked `CSS?`. Fix it with `--port` or `EQUIPMENT_PE300_PORT=/dev/ttyACM0` if other serial devices are connected.
 3. Check with `equipment pe300 status`.
 4. Don't use the Control Pod during a run. Every setting is verified, so a change from the pod stops the run with an error.
 
 ### Canon EOS R10
 
-1. `pip install -e ".[canon]"`, or `sudo dnf install libgphoto2 gphoto2 python3-gphoto2`. Check the connection with `gphoto2 --auto-detect`.
+Fedora only: libgphoto2, which controls the camera over USB, does not exist for Windows.
+
+1. The Fedora installer installs libgphoto2 and python-gphoto2. By hand: `pip install -e ".[canon]"`, or `sudo dnf install libgphoto2 gphoto2 python3-gphoto2`. Check the connection with `gphoto2 --auto-detect`.
 2. Turn the camera on and connect a USB data cable. Turn **Wi-Fi and Bluetooth off** (while they are connected the R10 disables USB control) and disable auto power off.
 3. For video, put the photo/movie switch on movie and insert a card.
-4. On GNOME the file manager claims the camera. If you get "could not claim the USB device", run `gio mount -s gphoto2; pkill -f gvfs-gphoto2-volume-monitor`.
+4. On GNOME the file manager claims the camera. If you get "could not claim the USB device", run `gio mount -s gphoto2; pkill -f gvfs-gphoto2-volume-monitor`. For a permanent fix, use `./install.sh --mask-gvfs`.
 
 ### FLIR Blackfly S
 
 The camera needs one of these two libraries (neither is on PyPI).
 
-**Spinnaker + PySpin** (Teledyne's SDK):
+**Spinnaker + PySpin** (Teledyne's SDK; the one to use on **Windows**):
 
-1. Install the Spinnaker SDK from teledynevisionsolutions.com.
-2. Install the matching wheel with `pip install spinnaker_python-<version>-cp3XX-...whl`.
+1. Install the Spinnaker SDK from teledynevisionsolutions.com. It also installs the camera's USB3 driver.
+2. Install the matching wheel. The Windows installer does this from Downloads; by hand: `pip install spinnaker_python-<version>-cp3XX-...whl`.
 
-**Aravis** (open source, easiest on Fedora):
+**Aravis** (open source; the one to use on **Fedora**):
 
-1. Install the packages:
-   - Fedora: `sudo dnf install aravis-0.8 aravis-0.8-viewer python3-gobject`
-   - Ubuntu: `sudo apt install gir1.2-aravis-0.8 aravis-tools python3-gi`
-2. Create the venv with `--system-site-packages`.
-3. Install Aravis's udev rule (`aravis.rules`) into `/etc/udev/rules.d/`, or test once with `sudo`.
+1. The Fedora installer builds Aravis 0.8.36 into `/usr/local` and registers it (`/etc/ld.so.conf.d/lab-aravis.conf`, `/etc/profile.d/lab-aravis.sh`; `LAB/setup.sh` sets `GI_TYPELIB_PATH` as well).
+2. The environment must be created with `--system-site-packages`, as the installer does.
+3. The installer's udev rule (vendor `1e10`) lets you open the camera without `sudo`.
 
 With either library:
 
 - Use a USB3 port (the blue one).
-- For full-speed video, raise the USB buffer: `echo 1000 | sudo tee /sys/module/usbcore/parameters/usbfs_memory_mb`.
+- For full-speed video on Linux, the USB buffer must be 1000 MB. The Fedora installer sets it, also for every boot. By hand: `echo 1000 | sudo tee /sys/module/usbcore/parameters/usbfs_memory_mb`.
 - Check that the camera is found with `equipment flir list`.
 
 ---
@@ -424,6 +471,7 @@ equipment/
     ├── __main__.py                   python -m equipment
     ├── cli.py                        the `equipment` command
     ├── devices.py                    `equipment devices`
+    ├── doctor.py                     `equipment doctor`: is this computer ready
     ├── paths.py                      where <data>/input and <data>/output are (LAB/data)
     ├── utils.py                      UTC time stamps, CSV writing, output paths, value matching
     ├── capture.py                    shared by both cameras: file numbering, capture log
@@ -431,8 +479,9 @@ equipment/
     ├── ramp.py                       stepped ramp of any light source
     ├── thorlabs/
     │   ├── common.py                 USB IDs, serial numbers / VISA resources
-    │   ├── usb_driver.py             kernel-driver detach (pyusb)
-    │   ├── dc2200.py                 DC2200Source, constant current, ramp
+    │   ├── usb_driver.py             kernel-driver detach (pyusb, Linux)
+    │   ├── visa.py                   opening an instrument: pyvisa-py (Linux) / NI-VISA (Windows)
+    │   ├── dc2200.py                 built-in SCPI driver, DC2200Source, constant current
     │   ├── pm400.py                  PM400 SCPI driver, open_pm400, power logging
     │   └── liv.py                    (old import path of experiments/liv.py)
     ├── coolled/

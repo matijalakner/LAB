@@ -1,0 +1,14 @@
+# udev rules for the lab equipment (installed by packaging/fedora/install.sh into
+# /etc/udev/rules.d/). They let a normal user open the instruments, without sudo
+# and without logging out.
+
+# Thorlabs DC2200 (1313:80c8) and PM400 (1313:8075), USBTMC over libusb
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1313", MODE:="0666", TAG+="uaccess"
+
+# CoolLED pE-300 (0483:a080): its two virtual serial ports /dev/ttyACM*
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a080", MODE:="0666", TAG+="uaccess"
+
+# FLIR / Point Grey cameras (Blackfly S), USB3 Vision through Aravis
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1e10", MODE:="0666", TAG+="uaccess"
+
+# Canon EOS cameras: covered by libgphoto2's own rules (40-libgphoto2.rules)

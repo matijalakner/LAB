@@ -204,7 +204,17 @@ def run(args):
             print(f"  {out[key]}")
 
 
+def _safe_console():
+    """Windows: a character the console code page lacks is replaced, not an error."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None):
+    _safe_console()
     args = build_parser().parse_args(argv)
     try:
         run(args)

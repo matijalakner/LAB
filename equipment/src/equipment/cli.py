@@ -1,6 +1,7 @@
 """Terminal control of the lab equipment.
 
     equipment devices                                  what is connected
+    equipment doctor                                   is this computer ready (Fedora/Windows)
     equipment dc2200 {set, off, ramp}                  Thorlabs DC2200 LED driver (A)
     equipment pe300  {set, off, status, ramp}          CoolLED pE-300 (%)
     equipment pm400  measure                           Thorlabs PM400 power meter
@@ -326,6 +327,9 @@ def build_parser():
     # -- devices -------------------------------------------------------------
     _cmd(devices, "devices", "List the connected instruments (Thorlabs USB, pE-300, Canon, "
                              "FLIR).")
+    _cmd(devices, "doctor", "Check that this computer (Fedora or Windows) has every library, "
+                            "driver and permission the instruments need, and say how to fix "
+                            "what is missing. Changes nothing.")
 
     # -- DC2200 --------------------------------------------------------------
     dc = _cmd(devices, "dc2200", "Thorlabs DC2200 LED driver. " + CURRENT_WARNING)
@@ -698,7 +702,13 @@ def run_devices(args, parser):
     return _call("devices:main_devices")
 
 
-HANDLERS = {"devices": run_devices, "dc2200": run_dc2200, "pe300": run_pe300,
+def run_doctor(args, parser):
+    fails = _call("doctor:main_doctor")
+    if fails:
+        sys.exit(1)
+
+
+HANDLERS = {"devices": run_devices, "doctor": run_doctor, "dc2200": run_dc2200, "pe300": run_pe300,
             "pe": run_pe300, "pm400": run_pm400,
             "pm": run_pm400, "liv": run_liv, "canon": run_canon, "flir": run_flir}
 
@@ -724,7 +734,17 @@ def resolve_dirs(args):
         args.input_dir = str(input_root(args.input_dir))
 
 
+def _safe_console():
+    """Windows: a character the console code page lacks is replaced, not an error."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None):
+    _safe_console()
     parser = build_parser()
     args = parser.parse_args(argv)
     resolve_dirs(args)

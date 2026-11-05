@@ -14,7 +14,13 @@ THORLABS_PRODUCTS = {DC2200_PRODUCT_ID: "DC2200 LED driver",
 
 
 def probe_thorlabs():
-    """[(description, detail)] of the Thorlabs USB devices; raises if pyusb is missing."""
+    """[(description, detail)] of the Thorlabs USB devices.
+
+    Linux: from the USB bus (pyusb). Windows: from the VISA library (NI-VISA).
+    """
+    from .thorlabs.visa import is_windows
+    if is_windows():
+        return probe_thorlabs_visa()
     try:
         import usb.core
         import usb.util
@@ -32,7 +38,27 @@ def probe_thorlabs():
     return out
 
 
+def probe_thorlabs_visa():
+    from .thorlabs.visa import find_resource, resource_manager, resource_serial
+    rm = resource_manager()
+    try:
+        out = []
+        for pid, name in THORLABS_PRODUCTS.items():
+            for res in find_resource(rm, pid, None):
+                out.append((f"Thorlabs {name}", f"serial {resource_serial(res)} ({res})"))
+        return out
+    finally:
+        try:
+            rm.close()
+        except Exception:
+            pass
+
+
 def probe_canon():
+    from .canon.camera import WINDOWS_MESSAGE
+    import sys
+    if sys.platform.startswith("win"):
+        raise RuntimeError(WINDOWS_MESSAGE)
     try:
         import gphoto2 as gp
     except ImportError as e:
@@ -67,28 +93,30 @@ def probe_flir():
             for backend, vendor, model, serial in found]
 
 
-PROBES = (("Thorlabs (USB)", probe_thorlabs),
+PROBES = (("Thorlabs (USB / VISA)", probe_thorlabs),
           ("CoolLED (USB serial)", probe_pe300),
           ("Canon (gphoto2)", probe_canon),
           ("FLIR (USB3 Vision)", probe_flir))
 
 
-def main_devices(cfg=None):
+def main_devices(cfg=None, configured=True, indent=""):
     """Print every instrument found; returns {group: [(name, detail)] or error text}."""
     result = {}
     for title, probe in PROBES:
-        print(f"{title}:")
+        print(f"{indent}{title}:")
         try:
             found = probe()
         except Exception as e:
             result[title] = str(e)
-            print(f"  not available: {e}")
+            print(f"{indent}  not available: {e}")
             continue
         result[title] = found
         if not found:
-            print("  nothing connected")
+            print(f"{indent}  nothing connected")
         for name, detail in found:
-            print(f"  {name:<28} {detail}")
+            print(f"{indent}  {name:<28} {detail}")
+    if not configured:
+        return result
     import os
     pe_port = os.environ.get("EQUIPMENT_PE300_PORT") or "automatic"
     from .paths import data_dir

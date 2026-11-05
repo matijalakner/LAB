@@ -8,6 +8,7 @@ the camera does not offer gives a clear error with the allowed values.
 
 gphoto2 is imported lazily, so the rest of the package works without it.
 """
+import sys
 import time
 from pathlib import Path
 
@@ -39,13 +40,20 @@ JPEG_SUFFIXES = {".jpg", ".jpeg"}
 VIDEO_SUFFIXES = {".mp4", ".mov", ".avi"}
 
 
+WINDOWS_MESSAGE = ("the Canon camera is not supported on Windows: libgphoto2, which "
+                   "controls it over USB, exists only for Linux and macOS. Use the FLIR "
+                   "camera on Windows, or the Canon on the Fedora computer.")
+
+
 def import_gphoto2():
+    if sys.platform.startswith("win"):
+        raise RuntimeError(WINDOWS_MESSAGE)
     try:
         import gphoto2 as gp
     except ImportError as e:
         raise RuntimeError(
             "python-gphoto2 is required for the camera: pip install -e \".[canon]\" "
-            "(or: sudo dnf install python3-gphoto2)") from e
+            "(packaging/fedora/install.sh installs libgphoto2 and it)") from e
     return gp
 
 

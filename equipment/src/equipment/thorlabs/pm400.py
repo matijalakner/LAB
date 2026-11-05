@@ -1,14 +1,14 @@
 """Thorlabs PM400 power meter, driven directly over SCPI with PyVISA.
 
-The `measurement_control` package has no power meter driver, so the meter is
-talked to here. The `PM400` class is also used by PM400_DC2200.py.
+Linux and Windows: the connection goes through visa.py (pyvisa-py with the
+kernel driver detached on Linux, the installed VISA library on Windows).
 """
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 
 from ..utils import utc_timestamp, write_csv
-from .common import PM_PRODUCT_ID, PM_RESOURCE, close_quietly, pm_resource, sleep_until
-from .usb_driver import ThorlabsUSBDriver
+from .common import PM_PRODUCT_ID, PM_RESOURCE, pm_resource, sleep_until
+from .visa import open_instrument
 
 PM_CSV_HEADER = ["time_s", "power_W"]
 
@@ -17,19 +17,13 @@ class PM400:
     """Minimal PM400 driver: wavelength, averaging and power readings (W)."""
 
     def __init__(self, resource=PM_RESOURCE, timeout_ms=5000):
+        self._stack = ExitStack()
         try:
-            import pyvisa
-        except ImportError as e:
-            raise RuntimeError(
-                "pyvisa is required for the PM400: pip install pyvisa pyvisa-py pyusb"
-            ) from e
-        self._rm = pyvisa.ResourceManager("@py")   # pure-Python backend, uses pyusb
-        try:
-            self._inst = self._rm.open_resource(resource)
-        except Exception:
-            close_quietly(self._rm)
+            self._inst = self._stack.enter_context(
+                open_instrument(resource, PM_PRODUCT_ID, timeout_ms=timeout_ms))
+        except BaseException:
+            self._stack.close()
             raise
-        self._inst.timeout = timeout_ms
 
     def idn(self):
         return self._inst.query("*IDN?").strip()
@@ -45,8 +39,7 @@ class PM400:
         return float(self._inst.query("MEAS:POW?"))
 
     def close(self):
-        close_quietly(self._inst)
-        close_quietly(self._rm)
+        self._stack.close()
 
     def __enter__(self):
         return self
@@ -58,20 +51,19 @@ class PM400:
 
 @contextmanager
 def open_pm400(serial=None, wavelength=None, averaging_count=None, verbose=True):
-    """Detach the kernel driver, connect and configure the PM400; yields the meter."""
-    with ThorlabsUSBDriver(product_id=PM_PRODUCT_ID):
-        with PM400(pm_resource(serial)) as meter:
-            if verbose:
-                print("PM400 connected:", meter.idn())
-            if wavelength is not None:
-                if wavelength <= 0:
-                    raise ValueError("wavelength must be > 0 nm")
-                meter.set_wavelength(wavelength)
-            if averaging_count is not None:
-                if int(averaging_count) < 1:
-                    raise ValueError("averaging_count must be >= 1")
-                meter.set_averaging(averaging_count)
-            yield meter
+    """Connect and configure the PM400; yields the meter."""
+    with PM400(pm_resource(serial)) as meter:
+        if verbose:
+            print("PM400 connected:", meter.idn())
+        if wavelength is not None:
+            if wavelength <= 0:
+                raise ValueError("wavelength must be > 0 nm")
+            meter.set_wavelength(wavelength)
+        if averaging_count is not None:
+            if int(averaging_count) < 1:
+                raise ValueError("averaging_count must be >= 1")
+            meter.set_averaging(averaging_count)
+        yield meter
 
 
 def _read_cfg(cfg):

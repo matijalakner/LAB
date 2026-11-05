@@ -420,3 +420,27 @@ def test_final_hold_keeps_the_light_at_min_and_photos_go_on(fake_serial, monkeyp
     ramp = read_csv(tmp_path / "out" / "ramp" / "r.csv")
     assert len(ramp) == 2 + 3                                # still one row per step
     assert device(fake_serial).lit() == {} and cam.closed    # all off at the very end
+
+
+def test_windows_port_names_are_recognised_by_usb_id(fake_serial, monkeypatch):
+    """Windows: 'USB Serial Device (COM5)', no CoolLED text; pyserial gives the USB ID."""
+    mod = pe300._import_serial()
+    ports = [types.SimpleNamespace(device=d, description=f"USB Serial Device ({d})",
+                                   manufacturer="Microsoft", product=None, interface=None,
+                                   vid=0x0483, pid=0xA080, serial_number="0000",
+                                   location=loc)
+             for d, loc in (("COM12", "1-9:x.2"), ("COM5", "1-9:x.0"))]
+    monkeypatch.setattr(mod.tools.list_ports, "comports", lambda: ports)
+    monkeypatch.setattr(pe300, "_probe", lambda port, timeout=0.6: True)
+    assert pe300.find_port() == "COM5"                  # one unit: lowest port number
+
+
+def test_fallback_probe_also_groups_one_unit(fake_serial, monkeypatch):
+    mod = pe300._import_serial()
+    ports = [types.SimpleNamespace(device=d, description="USB Serial Device", manufacturer=None,
+                                   product=None, interface=None, vid=0x1111, pid=0x2222,
+                                   serial_number="0000", location=loc)
+             for d, loc in (("COM7", "1-4:x.0"), ("COM8", "1-4:x.2"))]
+    monkeypatch.setattr(mod.tools.list_ports, "comports", lambda: ports)
+    monkeypatch.setattr(pe300, "_probe", lambda port, timeout=0.6: True)
+    assert pe300.find_port() == "COM7"

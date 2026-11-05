@@ -14,14 +14,20 @@ common interface:
 
 Both libraries are imported lazily, so the package works without them.
 """
+import sys
 from dataclasses import dataclass
 
 import numpy as np
 
+
 SPINNAKER_HINT = ("Spinnaker: install the Spinnaker SDK from teledynevisionsolutions.com and "
                   "the matching PySpin wheel (pip install spinnaker_python-...whl)")
-ARAVIS_HINT = ("Aravis: sudo dnf install aravis-0.8 python3-gobject (Ubuntu: sudo apt install "
-               "gir1.2-aravis-0.8 python3-gi) and create the venv with --system-site-packages")
+ARAVIS_HINT = ("Aravis: run packaging/fedora/install.sh (it builds Aravis 0.8 and installs "
+               "the udev rule), and create the venv with --system-site-packages")
+if sys.platform.startswith("win"):
+    # Aravis is not available on Windows: Spinnaker is the only option there
+    ARAVIS_HINT = ("Aravis is not available on Windows; use Spinnaker (run "
+                   "packaging/windows/install.ps1 after installing the SDK)")
 
 
 @dataclass

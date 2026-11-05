@@ -17,21 +17,35 @@ LAB/
 ├── data/               the folders are in git, the measurements in them are not
 │   ├── input/          photos and videos            (input/folder/<name>/)
 │   └── output/         equipment logs and analysis results
-└── setup.sh            one environment with both packages
+├── install.sh          Fedora: install everything (equipment/packaging/fedora)
+├── install.bat         Windows: install everything (equipment/packaging/windows)
+└── setup.sh            Fedora: activate the environment in a new terminal
 ```
 
 ## Installation
 
+One installer per system. Each sets up the drivers, permissions and the `lab` environment with both packages, then runs `equipment doctor` to check every instrument. Details are in [equipment's README](equipment/README.md#installation).
+
+**Fedora**
+
 ```bash
 git clone https://github.com/matijalakner/LAB.git
 cd LAB
-source setup.sh                   # creates the "lab" environment with both packages and activates it
+./install.sh                      # as your normal user; asks for the sudo password
+source setup.sh                   # in every new terminal
 ```
 
-`setup.sh` installs both modules in editable mode, with equipment's `thorlabs`, `coolled` and `flir` extras. To add the Canon extra, which needs the system library libgphoto2, run `EXTRAS=all source setup.sh`. The DC2200 driver (`measurement_control`) and the FLIR libraries (Spinnaker or Aravis) do not come from PyPI; see [equipment's README](equipment/README.md#installation).
+**Windows 10/11**
 
-To install the modules by hand:
+First install the Thorlabs software (DC2200, Optical Power Monitor) and the Spinnaker SDK, and download the Spinnaker Python wheel into Downloads. Then double-click `install.bat` in `LAB`, and work in the **LAB terminal** it puts on the desktop. The Canon camera is Fedora-only.
 
+**Checking:** `equipment doctor` on either system lists what is ready, what is missing, and how to fix it.
+
+**By hand** (environment only, without drivers and permissions):
+
+```bash
+source setup.sh                   # Fedora: creates and activates "lab" (EXTRAS=all for the Canon)
+```
 ```bash
 python3 -m venv --system-site-packages lab && source lab/bin/activate
 pip install -e "./equipment[thorlabs,coolled,flir]" -e "./line-analysis[test]"
