@@ -398,3 +398,25 @@ def test_set_with_hold(fake_serial):
     assert device(fake_serial).lit() == {"B": 40, "C": 1}
     cli.main(["pe300", "off"])
     assert device(fake_serial).lit() == {}
+
+
+def test_final_hold_keeps_the_light_at_min_and_photos_go_on(fake_serial, monkeypatch, tmp_path):
+    import time as _time
+    cam = FakeCam()
+    monkeypatch.setattr(paired_ramp, "_connect_flir", lambda get: cam)
+    t = _time.monotonic()
+    cli.main(["pe300", "ramp", "--channels", "B", "--hold", "C=7", "--min", "0", "--max", "10",
+              "--step", "10", "--step-time", "0.1", "--final-hold", "0.3",
+              "--photos", "h1", "--camera", "flir", "--photo-interval", "0.05",
+              "--output-dir", str(tmp_path / "out"), "--output-csv", "r.csv",
+              "--input-dir", str(tmp_path / "in")])
+    elapsed = _time.monotonic() - t
+    assert elapsed >= 0.3 + 0.3 - 0.01                       # 3 steps x 0.1 s + 0.3 s
+    log = read_csv(tmp_path / "out" / "ramp" / "r_photos.csv")[2:]
+    assert len(log) == 12                                    # every 0.05 s over 0.6 s
+    during_hold = [r for r in log if float(r[0]) >= 0.3]
+    assert len(during_hold) >= 5
+    assert all(r[4] == "3" and r[6] == "down" and r[7] == "0" for r in during_hold)
+    ramp = read_csv(tmp_path / "out" / "ramp" / "r.csv")
+    assert len(ramp) == 2 + 3                                # still one row per step
+    assert device(fake_serial).lit() == {} and cam.closed    # all off at the very end

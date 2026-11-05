@@ -125,3 +125,18 @@ def test_data_folder_rules(tmp_path, monkeypatch):
 
 def test_capture_folder_default(data_folder):
     assert capture_folder("run1") == data_folder / "input" / "folder" / "run1"
+
+
+def test_schedule_with_final_hold():
+    from equipment.experiments.paired_ramp import schedule_times
+    assert schedule_times(3, 10) == [5, 15, 25]
+    assert schedule_times(3, 10, final_hold=20) == [5, 15, 25, 35, 45]   # same cadence
+    assert schedule_times(3, 10, delay=9, final_hold=5) == [9, 19, 29]   # 39 > 35: no photo
+    assert schedule_times(2, 10, interval=6, final_hold=10) == [0, 6, 12, 18, 24]
+
+
+def test_final_hold_must_not_be_negative():
+    from equipment.ramp import read_ramp_cfg
+    with pytest.raises(ValueError):
+        read_ramp_cfg({"min": 0, "max": 1, "step": 1, "step_time": 1, "final_hold": -1})
+    assert read_ramp_cfg({"min": 0, "max": 1, "step": 1, "step_time": 1})["final_hold"] == 0

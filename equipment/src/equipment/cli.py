@@ -276,6 +276,9 @@ def add_ramp_command(subparsers, key):
                    help="how long every step is held")
     g.add_argument("--cycles", type=_positive_int, default=1,
                    help="min -> max -> min cycles (default: 1)")
+    g.add_argument("--final-hold", type=_non_negative_float, default=0.0, metavar="S",
+                   help="when the ramp is back at --min, hold it S seconds longer before "
+                        "switching off; photos and power readings go on (default: 0)")
     if key == "dc2200":
         add_dc2200_serial(g)
     else:
@@ -520,7 +523,7 @@ def run_ramp(args, parser, key):
         parser.error("--step must be at least 1 % (the pE-300 sets whole percent)")
     cfg = {"source": key, "min": args.i_min, "max": args.i_max, "step": args.step,
            "step_time": args.step_time, "cycles": args.cycles,
-           "output_csv": _csv(args, "ramp")}
+           "final_hold": args.final_hold, "output_csv": _csv(args, "ramp")}
     if key == "dc2200":
         cfg["dc2200_serial"] = args.dc2200_serial
     else:

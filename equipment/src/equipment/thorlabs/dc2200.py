@@ -108,7 +108,8 @@ def main_ramp(cfg, on_start=None, on_step=None):
     end and on any error, including Ctrl+C.
     """
     get = read_cfg(cfg)
-    keys = ("i_min", "i_max", "step", "step_time", "cycles", "output_csv", "dc2200_serial")
+    keys = ("i_min", "i_max", "step", "step_time", "cycles", "output_csv", "dc2200_serial",
+            "final_hold")
     return main_source_ramp({**{k: get(k) for k in keys}, "source": "dc2200"},
                             on_start, on_step)
 

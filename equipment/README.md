@@ -154,6 +154,7 @@ Every setting is read back from the unit and checked. If the Control Pod changes
 With `--min 0 --max 0.5 --step 0.1 --step-time 2` the level goes 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.4, 0.3, 0.2, 0.1, 0. Every value is held for 2 s, 22 s in total. With `--min 0 --max 0.5 --step 0.1 --step-time 2` the current goes 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.4, 0.3, 0.2, 0.1, 0 A. Every value is held for 2 s, 22 s in total.
 
 - The maximum is not repeated.
+- `--final-hold S` keeps the light at the last level (back at `--min`) for `S` seconds longer before switching it off. Photos and power readings continue on the same schedule. In the logs the hold counts as part of the last step (same step number, `direction` `down`), so `analysis report` reads it as before.
 - If `max − min` is not a multiple of `step`, the last step up is shorter, so the ramp always reaches exactly `--max`.
 - The steps are timed from a clock, so they do not drift.
 

@@ -5,7 +5,9 @@
 
 Every level is held for ``step_time`` seconds; the steps are timed from a clock,
 so they do not drift. The maximum is not repeated and the ramp always ends
-exactly on ``max`` (the last step up is shorter if needed).
+exactly on ``max`` (the last step up is shorter if needed). With
+``final_hold`` the last level (back at ``min``) is held that many seconds longer
+before the light is switched off; it stays one step in the CSV.
 
 CSV (first line: time_stamp,<UTC time at the start of the ramp>):
     time_s, cycle, direction, <source column>      e.g. current_A or intensity_pct
@@ -70,7 +72,8 @@ def read_ramp_cfg(cfg, source_cls=None):
 
     p = {"min": float(value("min", "i_min")), "max": float(value("max", "i_max")),
          "step": float(value("step")), "step_time": float(value("step_time")),
-         "cycles": int(value("cycles", default=1)), "output_csv": get("output_csv")}
+         "cycles": int(value("cycles", default=1)), "output_csv": get("output_csv"),
+         "final_hold": float(get("final_hold") or 0)}
     if p["min"] < 0:
         raise ValueError("min must be >= 0")
     if p["max"] < p["min"]:
@@ -82,7 +85,14 @@ def read_ramp_cfg(cfg, source_cls=None):
         raise ValueError("step and step_time must be > 0")
     if p["cycles"] < 1:
         raise ValueError("cycles must be >= 1")
+    if p["final_hold"] < 0:
+        raise ValueError("final_hold must be >= 0 s")
     return p
+
+
+def ramp_duration(p, n_steps):
+    """Seconds from the first step until the light is switched off."""
+    return n_steps * p["step_time"] + p["final_hold"]
 
 
 def ramp_plan(p, source):
@@ -113,8 +123,9 @@ def run_ramp(source, cfg, on_start=None, on_step=None):
             source.prepare(limit=p["max"])
             source.set_level(sequence[0][2])
             source.switch_on()
-            print(f"{source.name}: {len(sequence)} steps x {p['step_time']:g} s = "
-                  f"{len(sequence) * p['step_time']:g} s")
+            hold = f" + {p['final_hold']:g} s at the end" if p["final_hold"] else ""
+            print(f"{source.name}: {len(sequence)} steps x {p['step_time']:g} s{hold} = "
+                  f"{ramp_duration(p, len(sequence)):g} s")
             time_stamp = utc_timestamp()
             t0 = time.monotonic()
             if on_start:
@@ -128,6 +139,9 @@ def run_ramp(source, cfg, on_start=None, on_step=None):
                 print(f"[{k + 1}/{len(sequence)}] cycle {cycle} {direction}: "
                       f"{source.fmt(level)}")
             sleep_until(t0 + len(sequence) * p["step_time"])   # hold the last step
+            if p["final_hold"]:
+                print(f"holding {source.fmt(sequence[-1][2])} for {p['final_hold']:g} s more")
+                sleep_until(t0 + ramp_duration(p, len(sequence)))
         finally:
             source.switch_off()
     finally:

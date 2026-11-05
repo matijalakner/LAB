@@ -352,3 +352,22 @@ def test_input_and_output_dir_still_override(calls, tmp_path):
                  "--output-dir", str(tmp_path / "o"))
     assert Path(cfg["input_dir"]) == tmp_path / "i"
     assert Path(cfg["output_csv"]).parent == tmp_path / "o" / "camera"
+
+
+def test_final_hold_option(calls):
+    _, cfg = run(calls, "pe300", "ramp", "--channels", "B", "--min", "0", "--max", "100",
+                 "--step", "5", "--step-time", "60", "--final-hold", "60")
+    assert cfg["final_hold"] == 60
+
+
+def test_final_hold_default_is_zero(calls):
+    _, cfg = run(calls, "dc2200", "ramp", "--min", "0", "--max", "1", "--step", "0.5",
+                 "--step-time", "1")
+    assert cfg["final_hold"] == 0
+
+
+def test_final_hold_cannot_be_negative(calls):
+    with pytest.raises(SystemExit):
+        cli.main(["pe300", "ramp", "--channels", "B", "--min", "0", "--max", "10", "--step",
+                  "5", "--step-time", "1", "--final-hold", "-5"])
+    assert calls == []

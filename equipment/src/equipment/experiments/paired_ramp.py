@@ -36,9 +36,14 @@ from ..sources import make_source, source_class
 from ..utils import read_cfg, utc_timestamp
 
 
-def schedule_times(n_steps, step_time, delay=None, interval=None):
-    """Measurement times in seconds from the ramp start."""
-    total = n_steps * step_time
+def schedule_times(n_steps, step_time, delay=None, interval=None, final_hold=0.0):
+    """Measurement times in seconds from the ramp start.
+
+    ``final_hold`` (s) extends the last step; measurements continue through it
+    on the same schedule (every ``interval`` s, or every ``step_time`` s at
+    ``delay``).
+    """
+    total = n_steps * step_time + (final_hold or 0)
     if interval is not None:
         if interval <= 0:
             raise ValueError("interval must be > 0 s")
@@ -47,7 +52,11 @@ def schedule_times(n_steps, step_time, delay=None, interval=None):
     delay = step_time / 2 if delay is None else float(delay)
     if not 0 <= delay < step_time:
         raise ValueError("delay must be >= 0 and shorter than the step time")
-    return [round(k * step_time + delay, 6) for k in range(n_steps)]
+    times, k = [], 0
+    while k * step_time + delay < total - 1e-9:
+        times.append(round(k * step_time + delay, 6))
+        k += 1
+    return times
 
 
 def log_path(ramp_csv, suffix):
@@ -227,7 +236,8 @@ def main_paired_ramp(cfg):
     cfg:
       source         'dc2200' (default) or 'pe300', with its settings
                      (dc2200_serial; port, channels)
-      ramp           min/max (or i_min/i_max), step, step_time, cycles, output_csv
+      ramp           min/max (or i_min/i_max), step, step_time, cycles, output_csv,
+                     final_hold (s the last level is held longer; measurements go on)
       photos         camera = measurement name (photo folder), camera_type
                      ('canon' or 'flir'), photo_delay or photo_interval,
                      input_dir, keep_on_card and the camera settings (see
@@ -246,9 +256,10 @@ def main_paired_ramp(cfg):
     want_photos, want_power = bool(get("camera")), bool(get("power"))
     if not (want_photos or want_power):
         raise ValueError("nothing to pair: give camera (photos) and/or power")
-    photo_times = schedule_times(n, st, get("photo_delay"), get("photo_interval")) \
+    hold = p["final_hold"]
+    photo_times = schedule_times(n, st, get("photo_delay"), get("photo_interval"), hold) \
         if want_photos else []
-    power_times = schedule_times(n, st, get("power_delay"), get("power_interval")) \
+    power_times = schedule_times(n, st, get("power_delay"), get("power_interval"), hold) \
         if want_power else []
     folder = capture_folder(get("camera"), get("input_dir")) if want_photos \
         else None
