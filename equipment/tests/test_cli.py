@@ -93,11 +93,11 @@ def test_dc2200_ramp(calls, tmp_path):
     assert Path(cfg["output_csv"]) == tmp_path / "ramp" / "run1.csv"
 
 
-def test_dc2200_ramp_default_csv_name(calls):
+def test_dc2200_ramp_default_csv_name(calls, data_folder):
     _, cfg = run(calls, "dc2200", "ramp", "--min", "0", "--max", "0.5", "--step", "0.1",
                  "--step-time", "1")
     p = Path(cfg["output_csv"])
-    assert p.parent == Path("output/ramp") and p.name.startswith("ramp_")
+    assert p.parent == data_folder / "output" / "ramp" and p.name.startswith("ramp_")
 
 
 def test_ramp_camera_option_without_photos_is_refused(calls):
@@ -146,13 +146,13 @@ def test_ramp_photo_option_conflicts(calls, argv):
 
 # -- PM400 / LIV -------------------------------------------------------------
 @pytest.mark.parametrize("device", ["pm400", "pm"])
-def test_pm400_measure(calls, device):
+def test_pm400_measure(calls, device, data_folder):
     target, cfg = run(calls, device, "measure", "--wavelength", "633", "--duration", "2",
                       "--rate", "5", "--pm400-serial", "P1")
     assert target == "thorlabs.pm400:main_power_measurement"
     assert cfg["wavelength"] == 633 and cfg["sample_duration"] == 2
     assert cfg["sample_rate"] == 5 and cfg["pm400_serial"] == "P1"
-    assert Path(cfg["output_csv"]).parent == Path("output/pm")
+    assert Path(cfg["output_csv"]).parent == data_folder / "output" / "pm"
 
 
 def test_pm400_old_option_names(calls):
@@ -160,13 +160,13 @@ def test_pm400_old_option_names(calls):
     assert cfg["sample_duration"] == 3 and cfg["sample_rate"] == 2
 
 
-def test_liv(calls):
+def test_liv(calls, data_folder):
     target, cfg = run(calls, "liv", "--i-max", "0.05", "--ramp-duration", "10",
                       "--output-csv", "liv_run1.csv")
     assert target == "experiments.liv:main_liv_measurement"
     assert cfg["source"] == "dc2200"
     assert cfg["i_min"] == 0 and cfg["i_max"] == 0.05
-    assert Path(cfg["output_csv"]) == Path("output/liv/liv_run1.csv")
+    assert Path(cfg["output_csv"]) == data_folder / "output" / "liv" / "liv_run1.csv"
 
 
 # -- Canon -------------------------------------------------------------------
@@ -175,12 +175,13 @@ def test_canon_info(calls):
                                            {"sync_clock": False})
 
 
-def test_canon_photo(calls):
+def test_canon_photo(calls, data_folder):
     target, cfg = run(calls, "canon", "photo", "sample-1", "-i", "--shutter", "1/250",
                       "--iso", "200", "--color-temp", "5200")
     assert target == "canon.capture:main_photo"
     assert cfg["name"] == "sample-1" and cfg["interactive"] is True
-    assert cfg["colortemperature"] == "5200" and cfg["input_dir"] == "input"
+    assert cfg["colortemperature"] == "5200"
+    assert Path(cfg["input_dir"]) == data_folder / "input"
 
 
 def test_canon_timelapse(calls):
@@ -334,3 +335,20 @@ def test_pe300_hold_invalid(calls, argv):
     with pytest.raises(SystemExit) as e:
         cli.main(argv)
     assert e.value.code == 2 and calls == []
+
+
+# -- where the data goes -------------------------------------------------------
+def test_data_dir_option(calls, tmp_path, monkeypatch):
+    monkeypatch.delenv("EQUIPMENT_DATA")
+    _, cfg = run(calls, "--data-dir", str(tmp_path / "lab"), "pe300", "ramp", "--min", "0",
+                 "--max", "10", "--step", "5", "--step-time", "1", "--photos", "s1",
+                 "--camera", "flir")
+    assert Path(cfg["output_csv"]).parent == tmp_path / "lab" / "output" / "ramp"
+    assert Path(cfg["input_dir"]) == tmp_path / "lab" / "input"
+
+
+def test_input_and_output_dir_still_override(calls, tmp_path):
+    _, cfg = run(calls, "flir", "photo", "s", "--input-dir", str(tmp_path / "i"),
+                 "--output-dir", str(tmp_path / "o"))
+    assert Path(cfg["input_dir"]) == tmp_path / "i"
+    assert Path(cfg["output_csv"]).parent == tmp_path / "o" / "camera"

@@ -103,3 +103,25 @@ def test_flir_exposure_parsing():
     assert parse_exposure_us("4ms") == pytest.approx(4000)
     assert parse_exposure_us("250us") == pytest.approx(250)
     assert parse_exposure_us("auto") == "Continuous"
+
+
+
+def test_data_folder_rules(tmp_path, monkeypatch):
+    from equipment import paths
+    monkeypatch.setenv("EQUIPMENT_DATA", str(tmp_path / "a"))
+    assert paths.input_root() == tmp_path / "a" / "input"
+    monkeypatch.delenv("EQUIPMENT_DATA")
+    monkeypatch.setenv("LINE_ANALYSIS_DATA", str(tmp_path / "b"))   # shared with analysis
+    assert paths.output_root() == tmp_path / "b" / "output"
+    monkeypatch.delenv("LINE_ANALYSIS_DATA")
+    lab = tmp_path / "LAB"
+    (lab / "data" / "output").mkdir(parents=True)
+    monkeypatch.setattr(paths, "_PACKAGE_DIR", lab / "equipment")
+    assert paths.data_dir() == lab / "data"                         # LAB/data
+    monkeypatch.setattr(paths, "_PACKAGE_DIR", tmp_path / "elsewhere" / "equipment")
+    assert paths.data_dir() == Path("data")                         # ./data
+    assert paths.input_root("x") == Path("x")
+
+
+def test_capture_folder_default(data_folder):
+    assert capture_folder("run1") == data_folder / "input" / "folder" / "run1"

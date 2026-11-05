@@ -250,7 +250,7 @@ def main_paired_ramp(cfg):
         if want_photos else []
     power_times = schedule_times(n, st, get("power_delay"), get("power_interval")) \
         if want_power else []
-    folder = capture_folder(get("camera"), get("input_dir") or "input") if want_photos \
+    folder = capture_folder(get("camera"), get("input_dir")) if want_photos \
         else None
 
     recorders, photos, power = [], None, None

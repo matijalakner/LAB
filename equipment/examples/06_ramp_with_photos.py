@@ -4,18 +4,19 @@ Needs the `measurement_control` package, pyusb and python-gphoto2, a connected
 DC2200 and the camera (USB, Wi-Fi/Bluetooth off, mode dial on M).
 Currents are in AMPERES - check your LED head's rating before running.
 
-Photos:     input/folder/<NAME>/<NAME>_XXXX.jpg
-Ramp:       output/ramp/example_ramp_camera.csv
-Photo log:  output/ramp/example_ramp_camera_photos.csv  (same t = 0, with current_A)
+Photos:     <data>/input/folder/<NAME>/<NAME>_XXXX.jpg
+Ramp:       <data>/output/ramp/example_ramp_camera.csv
+Photo log:  <data>/output/ramp/example_ramp_camera_photos.csv  (same t = 0, with current_A)
 
 Run:  python 06_ramp_with_photos.py
 """
 from equipment import main_ramp_camera
+from equipment.utils import output_csv_path
 
 cfg = {
     # ramp
     "i_min": 0.05, "i_max": 0.5, "step": 0.05, "step_time": 10.0, "cycles": 1,
-    "output_csv": "output/ramp/example_ramp_camera.csv",
+    "output_csv": output_csv_path(None, "ramp", "example_ramp_camera.csv"),
     # camera
     "camera": "sample-1-measurement",   # measurement name = photo folder and file prefix
     "photo_delay": 5.0,                 # one photo 5 s after every step starts

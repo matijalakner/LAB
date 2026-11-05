@@ -91,6 +91,9 @@ def main_devices(cfg=None):
             print(f"  {name:<28} {detail}")
     import os
     pe_port = os.environ.get("EQUIPMENT_PE300_PORT") or "automatic"
+    from .paths import data_dir
+    data = data_dir()
     print(f"\nConfigured:\n  DC2200 {dc2200_resource()}\n"
-          f"  PM400  {pm_resource()}\n  pE-300 port {pe_port}")
+          f"  PM400  {pm_resource()}\n  pE-300 port {pe_port}\n"
+          f"  data   {data.resolve()}  (photos: input/, logs: output/)")
     return result

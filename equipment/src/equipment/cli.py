@@ -12,18 +12,21 @@
 Pairing: every light source's ramp can be combined with any measurement:
     equipment <dc2200|pe300> ramp ... [--photos NAME [--camera canon|flir]] [--power]
 
-Data:   <output-dir>/<ramp|pm|liv|camera>/<kind>_<UTC time>.csv   (default output/)
-Files:  <input-dir>/folder/<name>/<name>_XXXX.jpg                 (default input/)
+Data:   <output-dir>/<ramp|pm|liv|camera>/<kind>_<UTC time>.csv   (default <data>/output)
+Files:  <input-dir>/folder/<name>/<name>_XXXX.jpg                 (default <data>/input)
+<data> is LAB/data (see paths.py), the same folder line-analysis reads.
 
 Nothing hardware-specific is imported until a command runs, so ``--help``
 works without any driver installed, and a missing library only matters for
 the instrument that needs it.
 """
 import argparse
+import os
 import sys
 from importlib import import_module
 
 from . import __version__
+from .paths import ENV_VAR, input_root, output_root
 from .utils import output_csv_path, utc_timestamp
 
 CURRENT_WARNING = "Currents are in AMPERES (0 - 2 A). Check the LED head's rating first."
@@ -82,8 +85,8 @@ def _cmd(subparsers, name, help_text, **kwargs):
 
 def add_output_options(parser, kind, prefix=None):
     g = parser.add_argument_group("output")
-    g.add_argument("--output-dir", default="output", metavar="DIR",
-                   help=f"root output folder; data goes to DIR/{kind}/ (default: output)")
+    g.add_argument("--output-dir", default=None, metavar="DIR",
+                   help=f"root output folder; data goes to DIR/{kind}/ (default: <data>/output)")
     g.add_argument("--output-csv", default=None, metavar="FILE",
                    help=f"CSV name (default: {prefix or kind}_<UTC time>.csv). A plain "
                         f"name is saved in DIR/{kind}/, a path is used as given.")
@@ -104,8 +107,8 @@ def add_pm400_serial(parser):
 def add_name_options(parser):
     parser.add_argument("name", help="measurement name: files are saved as "
                                      "<input-dir>/folder/<name>/<name>_XXXX.<ext>")
-    parser.add_argument("--input-dir", default="input", metavar="DIR",
-                        help="root folder for the captured files (default: input)")
+    parser.add_argument("--input-dir", default=None, metavar="DIR",
+                        help="root folder for the captured files (default: <data>/input)")
 
 
 def add_canon_settings(parser, shared=True):
@@ -237,8 +240,8 @@ def add_photo_options(parser):
                              "(default: half the step time)")
     timing.add_argument("--photo-interval", type=_positive_float, default=None, metavar="S",
                         help="instead: a photo every S seconds from the ramp start")
-    ph.add_argument("--input-dir", default="input", metavar="DIR",
-                    help="root folder for the photos (default: input)")
+    ph.add_argument("--input-dir", default=None, metavar="DIR",
+                    help="root folder for the photos (default: <data>/input)")
     ph.add_argument("--keep-on-card", action="store_true",
                     help="Canon: also keep the photos on the memory card")
     ph.add_argument("--shutter", "--exposure", dest="shutter", default=None,
@@ -311,6 +314,10 @@ def build_parser():
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--debug", action="store_true",
                         help="show the full traceback on errors")
+    parser.add_argument("--data-dir", default=None, metavar="DIR",
+                        help="folder with input/ and output/ (default: $EQUIPMENT_DATA, else "
+                             "$LINE_ANALYSIS_DATA, else LAB/data next to the equipment "
+                             "folder, else ./data)")
     devices = _subparsers(parser, "device", "instruments")
 
     # -- devices -------------------------------------------------------------
@@ -461,8 +468,8 @@ def build_parser():
     flv.add_argument("name", nargs="?", default="live",
                      help="prefix of the snapshots, saved as "
                           "<input-dir>/folder/<name>/<name>_XXXX.jpg (default: live)")
-    flv.add_argument("--input-dir", default="input", metavar="DIR",
-                     help="root folder for the snapshots (default: input)")
+    flv.add_argument("--input-dir", default=None, metavar="DIR",
+                     help="root folder for the snapshots (default: <data>/input)")
     flv.add_argument("--width", type=_positive_int, default=1280, metavar="PX",
                      help="window width in pixels (default: 1280; the window can be resized)")
     add_flir_settings(flv)
@@ -704,9 +711,20 @@ def _interrupted_message(args):
     return "Interrupted."
 
 
+def resolve_dirs(args):
+    """--data-dir and the <data>/input, <data>/output defaults (paths.py)."""
+    if args.data_dir:
+        os.environ[ENV_VAR] = str(args.data_dir)
+    if hasattr(args, "output_dir"):
+        args.output_dir = str(output_root(args.output_dir))
+    if hasattr(args, "input_dir"):
+        args.input_dir = str(input_root(args.input_dir))
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    resolve_dirs(args)
     try:
         HANDLERS[args.device](args, parser)
     except KeyboardInterrupt:

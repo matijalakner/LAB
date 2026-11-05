@@ -8,6 +8,7 @@ Run:  python 01_dc2200_ramp.py
 from types import SimpleNamespace
 
 from equipment import main_ramp
+from equipment.utils import output_csv_path
 
 cfg = SimpleNamespace(
     i_min=0.0,            # A, start current
@@ -15,7 +16,7 @@ cfg = SimpleNamespace(
     step=0.05,            # A, current increase per step
     step_time=2.0,        # s, how long EACH step is held
     cycles=1,             # number of min -> max -> min cycles
-    output_csv="output/ramp/example_ramp.csv",   # first line: time_stamp,<UTC>
+    output_csv=output_csv_path(None, "ramp", "example_ramp.csv"),   # first line: time_stamp,<UTC>
 )
 
 try:

@@ -57,7 +57,7 @@ class CanonCamera:
 
     >>> with CanonCamera() as cam:
     ...     cam.apply_settings(shutter="1/250", iso=200, whitebalance="Daylight")
-    ...     cam.capture_photo("input/folder/run1/run1_0000.jpg")
+    ...     cam.capture_photo("data/input/folder/run1/run1_0000.jpg")
     """
 
     def __init__(self):

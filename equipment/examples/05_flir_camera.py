@@ -3,8 +3,8 @@
 Needs Spinnaker + PySpin, or Aravis + PyGObject (see README, "FLIR camera setup"),
 and the camera on a USB3 port.
 
-Files go to input/folder/<name>/<name>_XXXX.jpg (and .mp4),
-the capture log to output/camera/.
+Files go to <data>/input/folder/<name>/<name>_XXXX.jpg (and .mp4),
+the capture log to <data>/output/camera/.
 
 Run:  python 05_flir_camera.py
 """
@@ -19,14 +19,14 @@ SETTINGS = {"shutter": "1/250", "gain": 0, "whitebalance": "off",
 
 
 def log():
-    return output_csv_path("output", "camera", f"flir_{utc_timestamp(compact=True)}.csv")
+    return output_csv_path(None, "camera", f"flir_{utc_timestamp(compact=True)}.csv")
 
 
 # 1. which cameras are connected, what the camera is set to and what it accepts
 main_flir_list()
 main_flir_info()
 
-# 2. one photo  ->  input/folder/sample-1-measurement/sample-1-measurement_XXXX.jpg
+# 2. one photo  ->  <data>/input/folder/sample-1-measurement/sample-1-measurement_XXXX.jpg
 main_flir_photo({"name": NAME, **SETTINGS, "output_csv": log()})
 
 # 3. a photo every 5 s for one minute, lossless PNG

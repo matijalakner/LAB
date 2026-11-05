@@ -7,7 +7,7 @@ the same shape as CanonCamera:
 
     >>> with FlirCamera() as cam:
     ...     cam.apply_settings(shutter="1/250", gain=0, whitebalance="off")
-    ...     cam.capture_photo("input/folder/run1/run1_0000.jpg")
+    ...     cam.capture_photo("data/input/folder/run1/run1_0000.jpg")
 
 * Photos are taken with a software trigger, so every photo is a fresh
   exposure started at the moment of the capture (no old frame from a buffer).

@@ -33,9 +33,13 @@ def write_csv(path, header, rows, time_stamp=None):
 def output_csv_path(output_dir, kind, output_csv=None):
     """Where a measurement CSV goes: <output_dir>/<kind>/<kind>_<UTC time>.csv.
 
+    ``output_dir`` None means <data>/output (see paths.py).
+
     ``output_csv`` overrides the name. A plain file name is placed in
     <output_dir>/<kind>/; a name that already contains a folder is used as given.
     """
+    from .paths import output_root
+    output_dir = output_root(output_dir)
     if output_csv is None:
         return Path(output_dir) / kind / f"{kind}_{utc_timestamp(compact=True)}.csv"
     p = Path(output_csv)

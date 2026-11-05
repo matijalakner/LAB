@@ -9,6 +9,7 @@ Run:  python 07_pe300.py
 import time
 
 from equipment import main_pe300_off, main_pe300_set, main_pe300_status, main_source_ramp
+from equipment.utils import output_csv_path
 
 # 1. port, firmware, wavelengths and the state of channels A, B, C
 main_pe300_status()
@@ -19,10 +20,10 @@ time.sleep(5)
 main_pe300_off()
 
 # 3. blue channel only: 0 -> 100 % in 10 % steps, 2 s each, and back
-#    -> output/ramp/example_pe300_ramp.csv   (time_s, cycle, direction, intensity_pct)
+#    -> <data>/output/ramp/example_pe300_ramp.csv   (time_s, cycle, direction, intensity_pct)
 try:
     rows = main_source_ramp({"source": "pe300", "channels": "B",
                              "min": 0, "max": 100, "step": 10, "step_time": 2,
-                             "output_csv": "output/ramp/example_pe300_ramp.csv"})
+                             "output_csv": output_csv_path(None, "ramp", "example_pe300_ramp.csv")})
 except KeyboardInterrupt:
     print("Interrupted - light switched off, partial data saved.")

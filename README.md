@@ -39,13 +39,9 @@ pip install -e "./equipment[thorlabs,coolled,flir]" -e "./line-analysis[test]"
 
 ## Data
 
-Both commands work with `LAB/data`:
-
-- **equipment** writes to `input/` and `output/` under the folder it is run from, so run it from `LAB/data`, or pass `--input-dir ../data/input --output-dir ../data/output`.
-- **analysis** finds `LAB/data` by itself, from any folder (see [Where the data is](line-analysis/README.md#where-the-data-is)).
+Both commands find `LAB/data` by themselves, from any folder: **equipment** writes photos to `data/input` and logs to `data/output`, and **analysis** reads them from there. Both use the same rules: `--data-dir` or `$EQUIPMENT_DATA` / `$LINE_ANALYSIS_DATA`, else `LAB/data`, else `./data` (see [equipment](equipment/README.md#where-the-data-goes) and [line-analysis](line-analysis/README.md#where-the-data-is)). `equipment devices` shows the folder in use.
 
 ```bash
-cd LAB/data
 equipment pe300 ramp --min 0 --max 100 --step 10 --step-time 30 \
     --photos mysample --camera flir --shutter 1/250 --gain 0 --wb off --power
 analysis folder mysample

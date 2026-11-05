@@ -165,7 +165,7 @@ These options go with `--photos NAME`:
 
 | Option | Meaning |
 |---|---|
-| `--photos NAME` | Take photos, saved as `input/folder/NAME/NAME_XXXX.jpg` (numbering continues) |
+| `--photos NAME` | Take photos, saved as `<data>/input/folder/NAME/NAME_XXXX.jpg` (numbering continues) |
 | `--camera canon\|flir` | Which camera (default `canon`) |
 | `--photo-delay S` | One photo per step, `S` s after the step starts (default: half the step time) |
 | `--photo-interval S` | Instead: a photo every `S` s from the ramp start |
@@ -248,7 +248,7 @@ Settings are all optional; any you leave out keep the value set on the camera. E
 |---|---|
 | `flir list [--backend]` | Connected cameras with serial numbers. |
 | `flir info [--serial] [--backend]` | Current settings with their allowed values or ranges. |
-| `flir live [NAME]` | Live view in a window, showing frame rate, exposure, gain and % saturated pixels. Keys: `+`/`-` exposure, `]`/`[` gain, `o` marks saturated pixels red, `c` crosshair, `s` saves a full-resolution snapshot to `input/folder/NAME/`, `q` quits. On exit it prints the `--shutter`/`--gain` values to reuse in other commands. |
+| `flir live [NAME]` | Live view in a window, showing frame rate, exposure, gain and % saturated pixels. Keys: `+`/`-` exposure, `]`/`[` gain, `o` marks saturated pixels red, `c` crosshair, `s` saves a full-resolution snapshot to `<data>/input/folder/NAME/`, `q` quits. On exit it prints the `--shutter`/`--gain` values to reuse in other commands. |
 | `flir photo NAME [-i]` | One photo, software-triggered (a fresh exposure). |
 | `flir timelapse NAME -n S [--count N \| --duration S]` | A photo every `S` s. |
 | `flir video NAME [--duration S] [--fps F] [--codec mp4v]` | Records the stream to `.mp4` on the computer. A `_frames.csv` file holds the real time of every frame. |
@@ -275,17 +275,23 @@ For measurements, fix the exposure, gain and white balance (`--shutter 1/250 --g
 
 ## Where the data goes
 
-`--output-dir` (default `output`) holds the logs; `--input-dir` (default `input`) holds the photos and videos.
+Photos and videos go to `<data>/input`, logs and measurements to `<data>/output`. `<data>` is the first of:
+
+1. `--data-dir DIR` (before the instrument name: `equipment --data-dir DIR pe300 ...`), or the environment variable `EQUIPMENT_DATA`, or `LINE_ANALYSIS_DATA` (the one `analysis` uses, so one setting serves both);
+2. `LAB/data`, the `data` folder next to this package's folder, when installed with `pip install -e` from `LAB/equipment`;
+3. `./data` in the folder you run the command from.
+
+These are the same rules `analysis` uses, so both always find the same folder, wherever you run them from. `equipment devices` prints the folder in use. `--input-dir` and `--output-dir` still override it for one run.
 
 | Command | File |
 |---|---|
-| `dc2200 ramp`, `pe300 ramp` | `output/ramp/ramp_<UTC>.csv`; with `--photos` also `ramp_<UTC>_photos.csv` and `input/folder/<name>/`; with `--power` also `ramp_<UTC>_power.csv` |
-| `pm400 measure` | `output/pm/pm_<UTC>.csv` |
-| `liv` | `output/liv/liv_<UTC>.csv` |
-| `canon ...` | `input/folder/<name>/<name>_XXXX.jpg`/`.mp4`, log `output/camera/camera_<UTC>.csv` |
-| `flir ...` | `input/folder/<name>/<name>_XXXX.jpg`/`.png`/`.tif`/`.mp4`, log `output/camera/flir_<UTC>.csv` |
+| `dc2200 ramp`, `pe300 ramp` | `<data>/output/ramp/ramp_<UTC>.csv`; with `--photos` also `ramp_<UTC>_photos.csv` and `<data>/input/folder/<name>/`; with `--power` also `ramp_<UTC>_power.csv` |
+| `pm400 measure` | `<data>/output/pm/pm_<UTC>.csv` |
+| `liv` | `<data>/output/liv/liv_<UTC>.csv` |
+| `canon ...` | `<data>/input/folder/<name>/<name>_XXXX.jpg`/`.mp4`, log `<data>/output/camera/camera_<UTC>.csv` |
+| `flir ...` | `<data>/input/folder/<name>/<name>_XXXX.jpg`/`.png`/`.tif`/`.mp4`, log `<data>/output/camera/flir_<UTC>.csv` |
 
-`--output-csv NAME` changes the file name. A plain name goes into the command's folder (`--output-csv run1.csv` → `output/ramp/run1.csv`); a name that contains a folder is used as given. CSVs are written also when a run is interrupted.
+`--output-csv NAME` changes the file name. A plain name goes into the command's folder (`--output-csv run1.csv` → `<data>/output/ramp/run1.csv`); a name that contains a folder is used as given. CSVs are written also when a run is interrupted.
 
 The ramp, pm and camera CSVs start with a line `time_stamp,<UTC time at t = 0>`, then the header:
 
@@ -369,9 +375,10 @@ With either library:
 
 ```python
 from equipment import main_ramp, main_source_ramp, main_paired_ramp, main_pe300_set
+from equipment.utils import output_csv_path        # output_csv_path(None, ...) -> <data>/output/...
 
 rows = main_ramp({"i_min": 0, "i_max": 0.5, "step": 0.05, "step_time": 2,      # DC2200
-                  "output_csv": "output/ramp/run1.csv"})
+                  "output_csv": output_csv_path(None, "ramp", "run1.csv")})
 
 main_pe300_set({"intensity": 30, "channels": "ABC"})                           # stays on
 
@@ -384,8 +391,9 @@ out = main_paired_ramp({"source": "pe300", "min": 0, "max": 100, "step": 10,
                         "camera": "mysample", "camera_type": "flir",
                         "shutter": "1/250", "gain": 0, "whitebalance": "off",
                         "power": True, "wavelength": 470,
-                        "output_csv": "output/ramp/run2.csv"})
+                        "output_csv": output_csv_path(None, "ramp", "run2.csv")})
 # out = {"rows": ramp rows, "photos": [files], "power": [power rows]}
+# photos go to <data>/input/folder/mysample/ unless "input_dir" is given
 ```
 
 Light sources can also be used directly. Each one is a context manager, and the light is switched off when you leave the block:
@@ -415,6 +423,7 @@ equipment/
     ├── __main__.py                   python -m equipment
     ├── cli.py                        the `equipment` command
     ├── devices.py                    `equipment devices`
+    ├── paths.py                      where <data>/input and <data>/output are (LAB/data)
     ├── utils.py                      UTC time stamps, CSV writing, output paths, value matching
     ├── capture.py                    shared by both cameras: file numbering, capture log
     ├── sources.py                    LightSource interface + registry (dc2200, pe300)
