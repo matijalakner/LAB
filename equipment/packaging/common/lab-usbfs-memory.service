@@ -1,0 +1,19 @@
+# Installed into /etc/systemd/system/ by packaging/<system>/install.sh (Fedora, Ubuntu).
+#
+# The FLIR camera streams through usbfs, whose buffer is 16 MB by default; at
+# full speed it needs 1000 MB, or frames are dropped. This sets it at every boot.
+#
+# Undo:  sudo systemctl disable --now lab-usbfs-memory.service
+#        sudo rm /etc/systemd/system/lab-usbfs-memory.service
+
+[Unit]
+Description=Lab equipment: 1000 MB USB buffer for the FLIR camera
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo 1000 > /sys/module/usbcore/parameters/usbfs_memory_mb'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

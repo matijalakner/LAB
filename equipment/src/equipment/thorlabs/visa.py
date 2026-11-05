@@ -1,10 +1,14 @@
 """Opening a Thorlabs USB instrument with PyVISA, the right way for each system.
 
-Linux (Fedora)
+Linux (Fedora, Ubuntu)
     The pure-Python VISA backend ``@py`` (pyvisa-py + pyusb) talks to the
     instrument over libusb. The kernel's usbtmc driver is detached while the
     instrument is open and attached again afterwards (usb_driver.py). Access
-    needs a udev rule for vendor 1313 (packaging/fedora/99-lab-equipment.rules).
+    needs a udev rule for vendor 1313 (packaging/common/99-lab-equipment.rules).
+
+macOS
+    ``@py`` over libusb (Homebrew), like Linux, but without detaching: macOS
+    has no kernel driver for these instruments, so nothing holds them.
 
 Windows
     The VISA library installed with Thorlabs' software (NI-VISA) is used: no
@@ -29,11 +33,28 @@ def is_windows():
     return sys.platform.startswith("win")
 
 
+def is_linux():
+    return sys.platform.startswith("linux")
+
+
 def visa_backend():
     """'' = the system VISA library (NI-VISA etc.), '@py' = pyvisa-py."""
     if os.environ.get(ENV_VAR) is not None:
         return os.environ[ENV_VAR]
     return "" if is_windows() else "@py"
+
+
+def ensure_libusb_findable():
+    """macOS: let pyusb find Homebrew's libusb, which is not on the default search
+    path (/opt/homebrew/lib on Apple Silicon, /usr/local/lib on Intel). ctypes reads
+    DYLD_FALLBACK_LIBRARY_PATH when it searches, so setting it here is enough."""
+    if sys.platform != "darwin":
+        return
+    current = [p for p in os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", "").split(":") if p]
+    wanted = [d for d in ("/opt/homebrew/lib", "/usr/local/lib", "/usr/lib")
+              if os.path.isdir(d) and d not in current]
+    if wanted:
+        os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = ":".join(current + wanted)
 
 
 def _import_pyvisa():
@@ -49,6 +70,7 @@ def resource_manager():
     """A PyVISA ResourceManager for this system; clear errors when VISA is missing."""
     pyvisa = _import_pyvisa()
     backend = visa_backend()
+    ensure_libusb_findable()
     try:
         return pyvisa.ResourceManager(backend)
     except (OSError, ValueError) as e:
@@ -98,7 +120,7 @@ def open_instrument(resource, product_id, timeout_ms=5000):
     On Linux the kernel driver is detached for the time it is open.
     """
     with ExitStack() as stack:
-        if not is_windows() and visa_backend() == "@py":
+        if is_linux() and visa_backend() == "@py":         # only Linux binds usbtmc
             stack.enter_context(ThorlabsUSBDriver(product_id=product_id))
         rm = resource_manager()
         stack.callback(close_quietly, rm)

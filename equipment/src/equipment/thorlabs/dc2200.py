@@ -15,7 +15,7 @@ builtin
 measurement_control
     The lab's separate package (Linux). ``auto`` uses it when it is installed
     on Linux, because it is the combination tested on the hardware, and the
-    built-in driver otherwise (always on Windows).
+    built-in driver otherwise (always on Windows and macOS).
 
 Currents are in AMPERES (the DC2200 accepts up to 2 A; check your LED head's rating).
 """
@@ -28,7 +28,7 @@ from ..sources import LightSource
 from ..utils import read_cfg
 from .common import DC2200_PRODUCT_ID, close_quietly, dc2200_resource
 from .usb_driver import ThorlabsUSBDriver
-from .visa import is_windows, open_instrument, scpi_errors
+from .visa import is_linux, open_instrument, scpi_errors
 
 MAX_CURRENT_A = 2.0
 MIN_LIMIT_A = 0.001          # the DC2200 does not accept a user limit below 1 mA
@@ -112,7 +112,7 @@ def dc2200_driver():
         raise ValueError(f"{DRIVER_ENV} must be auto, builtin or measurement_control")
     if choice != "auto":
         return choice
-    if is_windows():
+    if not is_linux():            # measurement_control is Linux-only (kernel detach)
         return "builtin"
     try:
         _import_dc2200()

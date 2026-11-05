@@ -42,7 +42,7 @@ VIDEO_SUFFIXES = {".mp4", ".mov", ".avi"}
 
 WINDOWS_MESSAGE = ("the Canon camera is not supported on Windows: libgphoto2, which "
                    "controls it over USB, exists only for Linux and macOS. Use the FLIR "
-                   "camera on Windows, or the Canon on the Fedora computer.")
+                   "camera on Windows, or the Canon on a Fedora, Ubuntu or macOS computer.")
 
 
 def import_gphoto2():
@@ -304,10 +304,15 @@ def _connect_hint(gp, err):
     text = f"could not connect to the camera: {err}"
     claim = getattr(gp, "GP_ERROR_IO_USB_CLAIM", -53)
     not_found = getattr(gp, "GP_ERROR_MODEL_NOT_FOUND", -105)
-    if err.code == claim:
-        text += ("\nAnother program holds the camera. On Fedora/GNOME the file manager "
-                 "grabs it: run  gio mount -s gphoto2  and  pkill -f gvfs-gphoto2-volume-monitor"
-                 "  and try again.")
+    if err.code == claim and sys.platform == "darwin":
+        text += ("\nAnother program holds the camera. On macOS the system's photo service "
+                 "grabs every camera: run  killall -9 ptpcamerad  and try again (quit "
+                 "Photos / Image Capture first).")
+    elif err.code == claim:
+        text += ("\nAnother program holds the camera. On GNOME (Fedora, Ubuntu) the file "
+                 "manager grabs it: run  gio mount -s gphoto2  and  pkill -f "
+                 "gvfs-gphoto2-volume-monitor  and try again (permanently: ./install.sh "
+                 "--mask-gvfs).")
     elif err.code == not_found:
         text += ("\nNo camera found. Switch the camera on, connect it with a USB data cable, "
                  "and switch Wi-Fi/Bluetooth off on the camera (USB is disabled while they "

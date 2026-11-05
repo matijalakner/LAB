@@ -18,9 +18,10 @@ def probe_thorlabs():
 
     Linux: from the USB bus (pyusb). Windows: from the VISA library (NI-VISA).
     """
-    from .thorlabs.visa import is_windows
+    from .thorlabs.visa import ensure_libusb_findable, is_windows
     if is_windows():
         return probe_thorlabs_visa()
+    ensure_libusb_findable()
     try:
         import usb.core
         import usb.util

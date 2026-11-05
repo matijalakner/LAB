@@ -1,8 +1,8 @@
 """`equipment doctor`: is this computer ready for every instrument?
 
 Checks the libraries, drivers and permissions each instrument needs on this
-system (Fedora / other Linux / Windows) and prints, for anything missing, how
-to fix it. Nothing is changed and no instrument is switched on: connected
+system (Fedora, Ubuntu, other Linux, macOS, Windows) and prints, for anything
+missing, how to fix it. Nothing is changed and no instrument is switched on: connected
 devices are only listed.
 
     OK    ready
@@ -19,8 +19,16 @@ from pathlib import Path
 
 OK, WARN, FAIL, NA = "OK", "WARN", "FAIL", "--"
 
-FEDORA_INSTALL = "run packaging/fedora/install.sh"
-WINDOWS_INSTALL = "run packaging\\windows\\install.bat"
+UNIX_INSTALL = "run ./install.sh in LAB"           # Fedora, Ubuntu, macOS
+WINDOWS_INSTALL = "run install.bat in LAB"
+LINUX = ("fedora", "ubuntu", "linux")
+
+# how to install a system library, per system
+LIBUSB_FIX = {"fedora": "sudo dnf install libusb1",
+              "ubuntu": "sudo apt install libusb-1.0-0",
+              "macos": "brew install libusb, and work in a terminal after 'source setup.sh' "
+                       "(it lets Python find Homebrew's libusb)",
+              "linux": "install libusb 1.0 with your package manager"}
 
 
 @dataclass
@@ -31,15 +39,34 @@ class Check:
     fix: str = ""
 
 
+def _os_release():
+    """/etc/os-release as a dict (empty if missing)."""
+    out = {}
+    try:
+        lines = Path("/etc/os-release").read_text().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        if "=" in line:
+            key, value = line.split("=", 1)
+            out[key.strip()] = value.strip().strip('"')
+    return out
+
+
 def system_name():
+    """'fedora', 'ubuntu' (also Debian and derivatives), 'linux', 'macos' or 'windows'."""
     if sys.platform.startswith("win"):
         return "windows"
+    if sys.platform == "darwin":
+        return "macos"
     if sys.platform.startswith("linux"):
-        try:
-            info = Path("/etc/os-release").read_text()
-        except OSError:
-            info = ""
-        return "fedora" if "ID=fedora" in info or 'ID="fedora"' in info else "linux"
+        info = _os_release()
+        ids = {info.get("ID", "")} | set(info.get("ID_LIKE", "").split())
+        if "fedora" in ids:
+            return "fedora"
+        if ids & {"ubuntu", "debian"}:
+            return "ubuntu"
+        return "linux"
     return sys.platform
 
 
@@ -55,7 +82,15 @@ def _version(mod):
 
 
 def _install_hint(system):
-    return WINDOWS_INSTALL if system == "windows" else FEDORA_INSTALL
+    return WINDOWS_INSTALL if system == "windows" else UNIX_INSTALL
+
+
+def _process_running(name):
+    import subprocess
+    try:
+        return subprocess.run(["pgrep", "-x", name], capture_output=True).returncode == 0
+    except OSError:
+        return False
 
 
 def _udev_has(*ids):
@@ -127,6 +162,8 @@ def check_thorlabs(system):
                          "NI-VISA), or NI-VISA from ni.com" if system == "windows"
                          else 'pip install -e ".[thorlabs]" (pyvisa-py)'))
     if system != "windows":
+        from .thorlabs.visa import ensure_libusb_findable
+        ensure_libusb_findable()
         usb = _module("usb.core")
         if usb is None:
             out.append(Check("Thorlabs DC2200/PM400", FAIL, "pyusb is not installed",
@@ -136,13 +173,14 @@ def check_thorlabs(system):
             ok = backend_mod is not None and backend_mod.get_backend() is not None
             out.append(Check("Thorlabs DC2200/PM400", OK if ok else FAIL,
                              "libusb found" if ok else "libusb 1.0 not found",
-                             "" if ok else "sudo dnf install libusb1"))
+                             "" if ok else LIBUSB_FIX.get(system, LIBUSB_FIX["linux"])))
+    if system in LINUX:
         if _udev_has("1313"):
             out.append(Check("Thorlabs DC2200/PM400", OK, "udev rule for vendor 1313"))
         else:
             out.append(Check("Thorlabs DC2200/PM400", WARN,
                              "no udev rule for Thorlabs (vendor 1313): only root can open "
-                             "the instruments", FEDORA_INSTALL))
+                             "the instruments", UNIX_INSTALL))
     from .thorlabs.dc2200 import dc2200_driver
     try:
         out.append(Check("Thorlabs DC2200/PM400", OK, f"DC2200 driver: {dc2200_driver()}"))
@@ -157,7 +195,7 @@ def check_pe300(system):
         return [Check("CoolLED pE-300", FAIL, "pyserial is not installed",
                       'pip install -e ".[coolled]"')]
     out = [Check("CoolLED pE-300", OK, f"pyserial {_version(serial)}")]
-    if system != "windows":
+    if system in LINUX:
         if _udev_has("0483", "a080"):
             out.append(Check("CoolLED pE-300", OK, "udev rule for the pE-300 (0483:a080)"))
         elif _in_group("dialout"):
@@ -165,7 +203,7 @@ def check_pe300(system):
         else:
             out.append(Check("CoolLED pE-300", WARN,
                              "no udev rule for 0483:a080 and not in group dialout: "
-                             "'permission denied' on /dev/ttyACM*", FEDORA_INSTALL))
+                             "'permission denied' on /dev/ttyACM*", UNIX_INSTALL))
     return out
 
 
@@ -201,12 +239,14 @@ def check_flir(system):
                          f"Aravis {aravis.MAJOR_VERSION}.{aravis.MINOR_VERSION}."
                          f"{aravis.MICRO_VERSION} installed"))
     if spin is None and aravis is None:
-        fix = ("install the Spinnaker SDK from teledynevisionsolutions.com, then "
-               + WINDOWS_INSTALL + " (it installs the PySpin wheel)") \
-            if system == "windows" else FEDORA_INSTALL + " (builds Aravis 0.8)"
+        fix = {"windows": "install the Spinnaker SDK from teledynevisionsolutions.com, then "
+                          + WINDOWS_INSTALL + " (it installs the PySpin wheel)",
+               "macos": UNIX_INSTALL + " (brew install aravis pygobject3)",
+               "ubuntu": UNIX_INSTALL + " (apt install gir1.2-aravis-0.8)",
+               }.get(system, UNIX_INSTALL + " (builds Aravis 0.8)")
         out.append(Check("FLIR Blackfly S", FAIL,
                          "no camera library (Spinnaker or Aravis) found", fix))
-    if system != "windows":
+    if system in LINUX:
         try:
             mb = int(Path("/sys/module/usbcore/parameters/usbfs_memory_mb").read_text())
         except (OSError, ValueError):
@@ -214,11 +254,11 @@ def check_flir(system):
         if mb is not None and mb < 1000:
             out.append(Check("FLIR Blackfly S", WARN,
                              f"USB buffer usbfs_memory_mb = {mb} (full-speed video needs "
-                             "1000)", FEDORA_INSTALL))
+                             "1000)", UNIX_INSTALL))
         if aravis is not None and not _udev_has("1e10"):
             out.append(Check("FLIR Blackfly S", WARN,
                              "no udev rule for FLIR (vendor 1e10): only root can open the "
-                             "camera", FEDORA_INSTALL))
+                             "camera", UNIX_INSTALL))
     return out
 
 
@@ -229,8 +269,17 @@ def check_canon(system):
     gp = _module("gphoto2")
     if gp is None:
         return [Check("Canon EOS R10", FAIL, "python-gphoto2 is not installed",
-                      FEDORA_INSTALL + ' (or pip install -e ".[canon]")')]
-    return [Check("Canon EOS R10", OK, f"python-gphoto2 {_version(gp)}")]
+                      UNIX_INSTALL + ' (or pip install -e ".[canon]")')]
+    out = [Check("Canon EOS R10", OK, f"python-gphoto2 {_version(gp)}")]
+    if system == "macos" and _process_running("ptpcamerad"):
+        out.append(Check("Canon EOS R10", WARN,
+                         "macOS's ptpcamerad is running and grabs cameras over USB",
+                         "before a Canon command: killall -9 ptpcamerad"))
+    elif system in LINUX and _process_running("gvfs-gphoto2-volume-monitor"):
+        out.append(Check("Canon EOS R10", WARN,
+                         "GNOME's gvfs-gphoto2-volume-monitor is running and may grab the "
+                         "camera", "./install.sh --mask-gvfs in LAB"))
+    return out
 
 
 def check_data():
@@ -256,7 +305,8 @@ def run_checks(system=None, connected=True):
 def main_doctor(cfg=None):
     """Print the checks; returns the number of FAIL lines."""
     system, checks = run_checks()
-    names = {"fedora": "Fedora", "linux": "Linux", "windows": "Windows"}
+    names = {"fedora": "Fedora", "ubuntu": "Ubuntu / Debian", "linux": "Linux",
+             "macos": "macOS", "windows": "Windows"}
     print(f"System: {names.get(system, system)} ({platform.platform()})\n")
     group = None
     for c in checks:

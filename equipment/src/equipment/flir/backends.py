@@ -22,12 +22,17 @@ import numpy as np
 
 SPINNAKER_HINT = ("Spinnaker: install the Spinnaker SDK from teledynevisionsolutions.com and "
                   "the matching PySpin wheel (pip install spinnaker_python-...whl)")
-ARAVIS_HINT = ("Aravis: run packaging/fedora/install.sh (it builds Aravis 0.8 and installs "
-               "the udev rule), and create the venv with --system-site-packages")
 if sys.platform.startswith("win"):
     # Aravis is not available on Windows: Spinnaker is the only option there
-    ARAVIS_HINT = ("Aravis is not available on Windows; use Spinnaker (run "
-                   "packaging/windows/install.ps1 after installing the SDK)")
+    ARAVIS_HINT = ("Aravis is not available on Windows; use Spinnaker (install the SDK, "
+                   "then run install.bat in LAB)")
+elif sys.platform == "darwin":
+    ARAVIS_HINT = ("Aravis: run ./install.sh in LAB (brew install aravis pygobject3, and an "
+                   "environment made with Homebrew's Python and --system-site-packages)")
+else:
+    ARAVIS_HINT = ("Aravis: run ./install.sh in LAB (Fedora: builds Aravis 0.8; Ubuntu: "
+                   "apt install gir1.2-aravis-0.8), with an environment made with "
+                   "--system-site-packages")
 
 
 @dataclass

@@ -9,50 +9,35 @@ The lab code in one repository, as two separate Python packages:
 
 Each module has its own `pyproject.toml`, README, examples and tests. You can install either one alone; neither imports the other.
 
-> **New here? Start with [INSTALL.md](INSTALL.md).** It's a step-by-step guide for **Fedora** (`./install.sh`) and **Windows 10/11** (`install.bat`), with the manufacturer software to install first and what to do if something goes wrong.
+> **New here? Start with [INSTALL.md](INSTALL.md).** It's a step-by-step guide for **Fedora**, **Ubuntu**, **macOS** (`./install.sh`) and **Windows 10/11** (`install.bat`), with what to install first and what to do if something goes wrong.
 
 ```text
 LAB/
 ├── equipment/          instrument control           (package `equipment`)
+│   └── packaging/      the installers: fedora/, ubuntu/, macos/, windows/
 ├── line-analysis/      line detection and analysis  (package `line_analysis`)
 ├── lab/                the shared virtual environment, not in git
 ├── data/               the folders are in git, the measurements in them are not
 │   ├── input/          photos and videos            (input/folder/<name>/)
 │   └── output/         equipment logs and analysis results
-├── INSTALL.md          how to install, step by step (Fedora and Windows)
-├── install.sh          Fedora: install everything (equipment/packaging/fedora)
-├── install.bat         Windows: install everything (equipment/packaging/windows)
-└── setup.sh            Fedora: activate the environment in a new terminal
+├── INSTALL.md          how to install, step by step, on every system
+├── install.sh          Fedora, Ubuntu, macOS: install everything
+├── install.bat         Windows: install everything
+└── setup.sh            Fedora, Ubuntu, macOS: activate the environment in a terminal
 ```
 
 ## Installation
 
-One installer per system. Each sets up the drivers, permissions and the `lab` environment with both packages, then runs `equipment doctor` to check every instrument. **The step-by-step guide is [INSTALL.md](INSTALL.md)**; technical details are in [equipment's README](equipment/README.md#installation).
+**Follow [INSTALL.md](INSTALL.md).** It's a step-by-step guide for every system, with what to install first and what to do if something goes wrong.
 
-**Fedora**
+| System | Install once | Then, every time you work |
+|---|---|---|
+| Fedora, Ubuntu, macOS | `./install.sh` | `source setup.sh` |
+| Windows 10/11 | double-click `install.bat` | the **LAB terminal** shortcut on the desktop |
 
-```bash
-git clone https://github.com/matijalakner/LAB.git
-cd LAB
-./install.sh                      # as your normal user; asks for the sudo password
-source setup.sh                   # in every new terminal
-```
+`./install.sh` recognises the system and starts the matching installer in [`equipment/packaging/`](equipment/packaging). After installing, `equipment doctor` checks every instrument on that computer. To update after `git pull`, run `./install.sh --python-only` (Windows: `install.bat -PythonOnly`).
 
-**Windows 10/11**
-
-First install the Thorlabs software (DC2200, Optical Power Monitor) and the Spinnaker SDK, and download the Spinnaker Python wheel into Downloads. Then double-click `install.bat` in `LAB`, and work in the **LAB terminal** it puts on the desktop. The Canon camera is Fedora-only.
-
-**Checking:** `equipment doctor` on either system lists what is ready, what is missing, and how to fix it.
-
-**By hand** (environment only, without drivers and permissions):
-
-```bash
-source setup.sh                   # Fedora: creates and activates "lab" (EXTRAS=all for the Canon)
-```
-```bash
-python3 -m venv --system-site-packages lab && source lab/bin/activate
-pip install -e "./equipment[thorlabs,coolled,flir]" -e "./line-analysis[test]"
-```
+Every instrument works on every system, except the Canon EOS R10 on Windows (its USB library exists only for Linux and macOS).
 
 ## Data
 

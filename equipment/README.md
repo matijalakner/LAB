@@ -40,56 +40,21 @@ The code was split out of [LineTracker](https://github.com/matijalakner/LineTrac
 
 ## Installation
 
-For a step-by-step guide, see [INSTALL.md](../INSTALL.md) in `LAB`. This section has the technical details.
+**To install, follow [INSTALL.md](../INSTALL.md) in `LAB`, a step-by-step guide.** This section is the technical summary.
 
-There is one installer per system. Each installs everything every instrument needs, then runs `equipment doctor` to check the result. Both can be run again at any time.
+There is one installer per system, in [`packaging/`](packaging). Each installs everything every instrument needs, then runs `equipment doctor` to check the result. Every installer can be run again at any time.
 
-| | Fedora | Windows 10/11 |
-|---|---|---|
-| Run | `./install.sh` in `LAB` | `install.bat` in `LAB` (double-click) |
-| Script | `equipment/packaging/fedora/install.sh` | `equipment/packaging/windows/install.ps1` |
-| Then | `source LAB/setup.sh` in each new terminal | the **LAB terminal** shortcut on the desktop |
-| DC2200, PM400 | ✓ (pyvisa-py over libusb, udev rule) | ✓ (NI-VISA from the Thorlabs software) |
-| pE-300 | ✓ (`/dev/ttyACM*`, udev rule) | ✓ (`COM` port, built-in driver) |
-| FLIR Blackfly S | ✓ (Aravis 0.8, built by the installer) | ✓ (Spinnaker SDK + PySpin) |
-| Canon EOS R10 | ✓ (libgphoto2) | ✗ (libgphoto2 is Linux/macOS only) |
+| | Fedora | Ubuntu | macOS | Windows 10/11 |
+|---|---|---|---|---|
+| Run | `./install.sh` in `LAB` | `./install.sh` in `LAB` | `./install.sh` in `LAB` | `install.bat` in `LAB` |
+| Afterwards | `source setup.sh` | `source setup.sh` | `source setup.sh` | **LAB terminal** shortcut |
+| DC2200, PM400 | pyvisa-py + libusb | pyvisa-py + libusb | pyvisa-py + libusb | NI-VISA |
+| pE-300 | `/dev/ttyACM*` | `/dev/ttyACM*` | `/dev/cu.usbmodem*` | `COM*` |
+| FLIR Blackfly S | Aravis (built) | Aravis (apt) | Aravis (Homebrew) | Spinnaker + PySpin |
+| Canon EOS R10 | libgphoto2 | libgphoto2 | libgphoto2 | ✗ not available |
+| Documentation | [fedora](packaging/fedora/README.md) | [ubuntu](packaging/ubuntu/README.md) | [macos](packaging/macos/README.md) | [windows](packaging/windows/README.md) |
 
-### Fedora
-
-```bash
-git clone https://github.com/matijalakner/LAB.git
-cd LAB
-./install.sh                 # options: --no-canon, --no-aravis, --mask-gvfs, --help
-source setup.sh              # in every new terminal
-```
-
-Run it as your normal user, not with `sudo`; it asks for your password when it needs root. It does the following:
-
-1. installs the system packages with dnf (Python, libusb, libgphoto2, the build tools);
-2. builds Aravis 0.8.36 into `/usr/local` for the FLIR camera, if Aravis 0.8 isn't there yet;
-3. installs `99-lab-equipment.rules` in `/etc/udev/rules.d/`, so the DC2200, PM400, pE-300 and FLIR open without `sudo`;
-4. adds you to `dialout` and sets the 1000 MB USB buffer the camera needs (now, and after every reboot);
-5. creates the environment `LAB/lab` (with `--system-site-packages`, for Aravis) and installs `equipment` and `line-analysis` in it.
-
-Log out and back in once, and reboot once, when it's done.
-
-### Windows
-
-1. Install the manufacturer software first. These bring the drivers, which aren't allowed to be redistributed:
-   - **Thorlabs DC2200** software and **Optical Power Monitor** (PM400) from thorlabs.com. They install NI-VISA, which `equipment` uses for both instruments. In Thorlabs' *Power Meter Driver Switcher*, the PM400 must use the **TLPM (VISA)** driver.
-   - **Spinnaker SDK** (Windows, 64-bit) from teledynevisionsolutions.com (free account). Also download the **Spinnaker Python** package for your Python version (e.g. cp312) and leave the `.zip` or `.whl` in Downloads.
-2. Get `LAB` (`git clone https://github.com/matijalakner/LAB.git`, or *Download ZIP* on GitHub and unpack it), then double-click **`install.bat`** in `LAB`.
-
-The installer does the following:
-
-1. finds Python 3.10–3.12, the versions PySpin exists for (the Spinnaker wheel decides which), or installs it with `winget`;
-2. creates `LAB\lab` with `equipment` and `line-analysis`;
-3. checks NI-VISA;
-4. installs PySpin from the wheel in Downloads;
-5. makes `LAB\lab-terminal.cmd` and a **LAB terminal** shortcut on the desktop;
-6. runs `equipment doctor`.
-
-It needs no administrator rights. If something was missing (e.g. the Spinnaker wheel), add it and run `install.bat` again. Options: `install.bat -Python 3.11`, `install.bat -SpinnakerWheel C:\path\spinnaker_python-...whl`.
+How the installers are built, and their shared options (`--no-canon`, `--no-flir`, `--python-only`, …), is described in [packaging/README.md](packaging/README.md).
 
 ### Checking: `equipment doctor`
 
@@ -100,7 +65,7 @@ It needs no administrator rights. If something was missing (e.g. the Spinnaker w
 Requires Python 3.10 or newer. The core and the CLI need only the standard library; install the extra for each instrument you use:
 
 ```bash
-pip install -e ".[thorlabs]"        # DC2200, PM400, LIV:  pyvisa, pyvisa-py (+ pyusb on Linux)
+pip install -e ".[thorlabs]"        # DC2200, PM400, LIV:  pyvisa, pyvisa-py (+ pyusb on Linux/macOS)
 pip install -e ".[coolled]"         # pE-300:              pyserial
 pip install -e ".[canon]"           # Canon:               python-gphoto2 (Linux/macOS)
 pip install -e ".[flir]"            # FLIR:                numpy, opencv-python, pillow
@@ -366,7 +331,8 @@ Numbering of `<name>_XXXX` continues after the files already in the folder, so n
 
    `equipment devices` shows the connected serials and the configured resources.
 2. How they are reached:
-   - **Fedora**: through `pyvisa-py` over libusb. The Linux kernel driver is detached while an instrument is open and attached again afterwards. This needs `pyusb` and USB permissions; the installer's udev rule for vendor `1313` gives them.
+   - **Fedora, Ubuntu**: through `pyvisa-py` over libusb. The Linux kernel driver is detached while an instrument is open and attached again afterwards. This needs `pyusb` and USB permissions; the installer's udev rule for vendor `1313` gives them.
+   - **macOS**: through `pyvisa-py` over Homebrew's libusb, without detaching (macOS has no driver for these instruments). `equipment` finds Homebrew's libusb itself.
    - **Windows**: through the VISA library the Thorlabs software installs (NI-VISA). If the resource name differs (hex vs decimal IDs), the instrument is found by its serial number.
    - `EQUIPMENT_VISA=@py` (or `@ivi`, or a VISA library path) overrides the choice.
 3. Both instruments are driven directly over SCPI.
@@ -384,19 +350,24 @@ Numbering of `<name>_XXXX` continues after the files already in the folder, so n
        sudo udevadm control --reload-rules && sudo udevadm trigger
        ```
      - or join the `dialout` group with `sudo usermod -aG dialout $USER`, then log out and back in.
+   - Ubuntu: the same as Linux above; the installers' udev rule gives access.
+   - macOS: `/dev/cu.usbmodem…`, open to every user; nothing to set up.
    - Windows: one or two `COM` ports. Windows 10/11 has the USB serial driver built in (older Windows: `CoolLEDpE.inf` from coolled.com).
+   - On every system the pE-300 is also recognised by its USB ID `0483:A080`, whatever the port is called.
 2. The port is found automatically when it identifies as CoolLED. Otherwise every USB serial port is asked `CSS?`. Fix it with `--port` or `EQUIPMENT_PE300_PORT=/dev/ttyACM0` if other serial devices are connected.
 3. Check with `equipment pe300 status`.
 4. Don't use the Control Pod during a run. Every setting is verified, so a change from the pod stops the run with an error.
 
 ### Canon EOS R10
 
-Fedora only: libgphoto2, which controls the camera over USB, does not exist for Windows.
+Fedora, Ubuntu and macOS. libgphoto2, which controls the camera over USB, does not exist for Windows.
 
-1. The Fedora installer installs libgphoto2 and python-gphoto2. By hand: `pip install -e ".[canon]"`, or `sudo dnf install libgphoto2 gphoto2 python3-gphoto2`. Check the connection with `gphoto2 --auto-detect`.
+1. The installers install libgphoto2 and python-gphoto2. By hand: `pip install -e ".[canon]"`, or `sudo dnf install libgphoto2 gphoto2 python3-gphoto2`. Check the connection with `gphoto2 --auto-detect`.
 2. Turn the camera on and connect a USB data cable. Turn **Wi-Fi and Bluetooth off** (while they are connected the R10 disables USB control) and disable auto power off.
 3. For video, put the photo/movie switch on movie and insert a card.
-4. On GNOME the file manager claims the camera. If you get "could not claim the USB device", run `gio mount -s gphoto2; pkill -f gvfs-gphoto2-volume-monitor`. For a permanent fix, use `./install.sh --mask-gvfs`.
+4. If you get "could not claim the USB device", another program holds the camera:
+   - On GNOME (Fedora, Ubuntu), the file manager. Run `gio mount -s gphoto2; pkill -f gvfs-gphoto2-volume-monitor`; for a permanent fix, use `./install.sh --mask-gvfs`.
+   - On macOS, the system's photo service. Close Photos and Image Capture and run `killall -9 ptpcamerad`.
 
 ### FLIR Blackfly S
 
@@ -407,16 +378,21 @@ The camera needs one of these two libraries (neither is on PyPI).
 1. Install the Spinnaker SDK from teledynevisionsolutions.com. It also installs the camera's USB3 driver.
 2. Install the matching wheel. The Windows installer does this from Downloads; by hand: `pip install spinnaker_python-<version>-cp3XX-...whl`.
 
-**Aravis** (open source; the one to use on **Fedora**):
+**Aravis** (open source; the one to use on **Fedora, Ubuntu and macOS**):
 
-1. The Fedora installer builds Aravis 0.8.36 into `/usr/local` and registers it (`/etc/ld.so.conf.d/lab-aravis.conf`, `/etc/profile.d/lab-aravis.sh`; `LAB/setup.sh` sets `GI_TYPELIB_PATH` as well).
-2. The environment must be created with `--system-site-packages`, as the installer does.
-3. The installer's udev rule (vendor `1e10`) lets you open the camera without `sudo`.
+1. Where it comes from:
+   - Fedora: built from source into `/usr/local` (0.8.36) and registered (`/etc/ld.so.conf.d/lab-aravis.conf`, `/etc/profile.d/lab-aravis.sh`).
+   - Ubuntu: the `gir1.2-aravis-0.8` package (built like on Fedora where it is missing).
+   - macOS: `brew install aravis pygobject3`.
+
+   `LAB/setup.sh` adds the matching GObject paths too.
+2. The environment must be created with `--system-site-packages`, as the installers do: the GObject bindings come from the system.
+3. On Linux, the installers' udev rule (vendor `1e10`) lets you open the camera without `sudo`. macOS needs nothing.
 
 With either library:
 
 - Use a USB3 port (the blue one).
-- For full-speed video on Linux, the USB buffer must be 1000 MB. The Fedora installer sets it, also for every boot. By hand: `echo 1000 | sudo tee /sys/module/usbcore/parameters/usbfs_memory_mb`.
+- For full-speed video on Linux, the USB buffer must be 1000 MB. The Fedora and Ubuntu installers set it, also for every boot (`lab-usbfs-memory.service`). By hand: `echo 1000 | sudo tee /sys/module/usbcore/parameters/usbfs_memory_mb`.
 - Check that the camera is found with `equipment flir list`.
 
 ---

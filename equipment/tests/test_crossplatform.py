@@ -260,7 +260,7 @@ def test_devices_on_windows_uses_visa(fake_visa, monkeypatch):
 # ---------------------------------------------------------------------------
 # doctor
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("system", ["fedora", "windows"])
+@pytest.mark.parametrize("system", ["fedora", "ubuntu", "macos", "windows"])
 def test_doctor_never_crashes(system):
     name, checks = doctor.run_checks(system)
     groups = {c.group for c in checks}
@@ -268,18 +268,69 @@ def test_doctor_never_crashes(system):
             "Canon EOS R10", "Data"} <= groups
     assert all(c.status in (doctor.OK, doctor.WARN, doctor.FAIL, doctor.NA) for c in checks)
     canon = [c for c in checks if c.group == "Canon EOS R10"]
-    if system == "windows":
-        assert canon[0].status == doctor.NA
+    assert (canon[0].status == doctor.NA) == (system == "windows")
     for c in checks:
         if c.status == doctor.FAIL:
             assert c.fix or "check failed" in c.text or c.group == "Python"
+    linux_only = [c for c in checks if "udev" in c.text or "usbfs" in c.text
+                  or "dialout" in c.text]
+    if system in ("macos", "windows"):
+        assert linux_only == []                       # no udev, groups or usbfs there
 
 
 def test_doctor_fixes_point_to_the_right_installer():
-    _, fedora = doctor.run_checks("fedora")
+    for system in ("fedora", "ubuntu", "macos"):
+        _, checks = doctor.run_checks(system)
+        assert not any("install.bat" in c.fix for c in checks), system
+        assert not any("dnf" in c.fix for c in checks if system != "fedora"), system
     _, windows = doctor.run_checks("windows")
-    assert not any("windows" in c.fix.lower() and "install.bat" in c.fix for c in fedora)
-    assert not any("fedora/install.sh" in c.fix for c in windows)
+    assert not any("install.sh" in c.fix for c in windows)
+
+
+@pytest.mark.parametrize("release,expected", [
+    ({"ID": "fedora"}, "fedora"),
+    ({"ID": "ubuntu", "ID_LIKE": "debian"}, "ubuntu"),
+    ({"ID": "linuxmint", "ID_LIKE": "ubuntu debian"}, "ubuntu"),
+    ({"ID": "debian"}, "ubuntu"),
+    ({"ID": "rocky", "ID_LIKE": "rhel centos fedora"}, "fedora"),
+    ({"ID": "arch"}, "linux"),
+])
+def test_system_name_on_linux(monkeypatch, release, expected):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(doctor, "_os_release", lambda: release)
+    assert doctor.system_name() == expected
+
+
+def test_system_name_macos_windows(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert doctor.system_name() == "macos"
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert doctor.system_name() == "windows"
+
+
+def test_no_kernel_driver_detach_on_macos(fake_visa, monkeypatch):
+    """macOS has no usbtmc driver: the Thorlabs instrument is opened directly."""
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setenv(visa.ENV_VAR, "@py")
+
+    def boom(*a, **k):
+        raise AssertionError("the kernel driver must not be touched on macOS")
+    monkeypatch.setattr(visa, "ThorlabsUSBDriver", boom)
+    monkeypatch.delenv("EQUIPMENT_DC2200_DRIVER")
+    assert dc2200.dc2200_driver() == "builtin"
+    with visa.open_instrument("USB0::4883::32968::M00937194::0::INSTR", DC2200_PRODUCT_ID):
+        pass
+
+
+def test_canon_claim_hint_per_system(monkeypatch):
+    from types import SimpleNamespace
+    from equipment.canon.camera import _connect_hint
+    gp = SimpleNamespace(GP_ERROR_IO_USB_CLAIM=-53, GP_ERROR_MODEL_NOT_FOUND=-105)
+    err = SimpleNamespace(code=-53)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert "ptpcamerad" in _connect_hint(gp, err)
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert "gvfs" in _connect_hint(gp, err)
 
 
 def test_doctor_command_exit_code(monkeypatch, capsys):
