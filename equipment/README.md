@@ -40,6 +40,8 @@ The code was split out of [LineTracker](https://github.com/matijalakner/LineTrac
 
 ## Installation
 
+For a step-by-step guide, see [INSTALL.md](../INSTALL.md) in `LAB`. This section has the technical details.
+
 There is one installer per system. Each installs everything every instrument needs, then runs `equipment doctor` to check the result. Both can be run again at any time.
 
 | | Fedora | Windows 10/11 |

@@ -9,6 +9,8 @@ The lab code in one repository, as two separate Python packages:
 
 Each module has its own `pyproject.toml`, README, examples and tests. You can install either one alone; neither imports the other.
 
+> **New here? Start with [INSTALL.md](INSTALL.md).** It's a step-by-step guide for **Fedora** (`./install.sh`) and **Windows 10/11** (`install.bat`), with the manufacturer software to install first and what to do if something goes wrong.
+
 ```text
 LAB/
 ├── equipment/          instrument control           (package `equipment`)
@@ -17,6 +19,7 @@ LAB/
 ├── data/               the folders are in git, the measurements in them are not
 │   ├── input/          photos and videos            (input/folder/<name>/)
 │   └── output/         equipment logs and analysis results
+├── INSTALL.md          how to install, step by step (Fedora and Windows)
 ├── install.sh          Fedora: install everything (equipment/packaging/fedora)
 ├── install.bat         Windows: install everything (equipment/packaging/windows)
 └── setup.sh            Fedora: activate the environment in a new terminal
@@ -24,7 +27,7 @@ LAB/
 
 ## Installation
 
-One installer per system. Each sets up the drivers, permissions and the `lab` environment with both packages, then runs `equipment doctor` to check every instrument. Details are in [equipment's README](equipment/README.md#installation).
+One installer per system. Each sets up the drivers, permissions and the `lab` environment with both packages, then runs `equipment doctor` to check every instrument. **The step-by-step guide is [INSTALL.md](INSTALL.md)**; technical details are in [equipment's README](equipment/README.md#installation).
 
 **Fedora**
 
