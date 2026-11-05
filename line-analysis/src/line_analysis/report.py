@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 
 from .calibration import COEFF, OBJECTIVES, PE300_W_PER_PCT, PX_TO_UM, THETA
+from .fits import FIT_CHOICES, fit_curve
 from .calibration import px_to_um as calibrated_px_to_um
 from .logs import LEVELS, companion, level_column, ramp_files, read_log, read_ramp
 
@@ -216,17 +217,31 @@ def linear_fit(x, y):
     return float(slope), float(intercept), r2, int(len(x))
 
 
+FITS_COLUMNS = ["y", "x", "direction", "model", "formula", "params", "slope", "intercept",
+                "slope_at_mean_x", "r2", "rmse", "aicc", "n"]
+
+
+def _fit_label(direction, fit):
+    if fit.model == "linear":
+        return f"{direction}: slope {fit.params[0]:.4g}, R² {fit.r2:.3f}"
+    return f"{direction}: {fit.model} ({fit.describe(3)}), R² {fit.r2:.3f}"
+
+
 def plot_report(table, info, out_png, name="", objective="20x", theta="0.8wt",
-                px_to_um=PX_TO_UM, fits_csv=None):
+                px_to_um=PX_TO_UM, fits_csv=None, fit="auto"):
     """Average distance and pitch against the level, power and time.
 
     Up and down branches of the ramp are drawn separately (hysteresis shows),
-    each with its linear fit on the level and power axes (not against time).
-    The fits are written to ``fits_csv`` if given. Photos with a warning are
-    left out. Returns the number of photos plotted.
+    each with its fit on the level and power axes (not against time). ``fit``
+    is one of fits.FIT_CHOICES: a model ('linear', 'quadratic', 'cubic',
+    'saturating', 'power', 'mm'), 'auto' (the best by AICc for each branch and
+    axis) or 'none'. The fits are written to ``fits_csv`` if given. Photos with
+    a warning are left out. Returns the number of photos plotted.
     """
     from .style import DIRECTION_STYLE, MUTED, figure, finish
 
+    if fit not in FIT_CHOICES:
+        raise ValueError(f"unknown fit '{fit}'; choose from {', '.join(FIT_CHOICES)}")
     if theta not in THETA:
         raise ValueError(f"unknown sample '{theta}'; choose from {sorted(THETA)}")
     ok = table[(table["warning"] == "") & table["mean_spacing_px"].notna()].copy()
@@ -250,17 +265,21 @@ def plot_report(table, info, out_png, name="", objective="20x", theta="0.8wt",
                 ax.scatter(part[xcol], part[ycol], s=30, color=color, marker=marker,
                            edgecolors="white", linewidths=1, label=f"ramp {direction}",
                            zorder=3)
-                if xcol == "time[s]":
+                if xcol == "time[s]" or fit == "none":
                     continue
-                fit = linear_fit(part[xcol], part[ycol])
-                if fit is None:
+                f = fit_curve(part[xcol], part[ycol], fit)
+                if f is None:
                     continue
-                slope, intercept, r2, n = fit
-                fits.append({"y": ycol, "x": xcol, "direction": direction, "slope": slope,
-                             "intercept": intercept, "r2": r2, "n": n})
-                xx = np.array([np.nanmin(part[xcol]), np.nanmax(part[xcol])], dtype=float)
-                line, = ax.plot(xx, slope * xx + intercept, color=color, lw=1.5, zorder=2,
-                                label=f"{direction}: slope {slope:.4g}, R² {r2:.3f}")
+                xmean = float(np.nanmean(part[xcol]))
+                fits.append({"y": ycol, "x": xcol, "direction": direction,
+                             "model": f.model, "formula": f.formula, "params": f.describe(8),
+                             "slope": f.params[0] if f.model == "linear" else np.nan,
+                             "intercept": f.params[1] if f.model == "linear" else np.nan,
+                             "slope_at_mean_x": f.slope_at(xmean), "r2": f.r2,
+                             "rmse": f.rmse, "aicc": f.aicc, "n": f.n})
+                xx = np.linspace(np.nanmin(part[xcol]), np.nanmax(part[xcol]), 200)
+                line, = ax.plot(xx, f.predict(xx), color=color, lw=1.5, zorder=2,
+                                label=_fit_label(direction, f))
                 fit_handles.append(line)
             ax.set_xlabel(xlabel)
             if c == 0:
@@ -273,8 +292,7 @@ def plot_report(table, info, out_png, name="", objective="20x", theta="0.8wt",
     if fit_legend is not None:
         axes[0, 0].add_artist(fit_legend)
     if fits_csv:
-        pd.DataFrame(fits, columns=["y", "x", "direction", "slope", "intercept", "r2", "n"]
-                     ).to_csv(fits_csv, index=False)
+        pd.DataFrame(fits, columns=FITS_COLUMNS).to_csv(fits_csv, index=False)
     note = f"level by {info['matched_by']}"
     if info["power_source"]:
         note += f", power from {info['power_source']}"
@@ -360,13 +378,14 @@ def choose_px_to_um(px_to_um=None, camera=None, objective=None, photo_dir=None, 
 
 def main_report(name, ramp=None, results=None, output_dir=None, objective=None,
                 theta="0.8wt", px_to_um=None, camera_offset_s=0.0, liv=None,
-                color=None, camera="auto", input_dir=None):
+                color=None, camera="auto", input_dir=None, fit="auto"):
     """Align, save and plot -> <output_dir>/report/<name>/data.csv, plots.png, timeline.png.
 
     ``results`` defaults to ``name`` (the folder name used with 'analysis folder').
     Micrometers per pixel: ``px_to_um`` if given, else from the calibration table
     for ``camera`` ('flir', 'canon', or 'auto' = from the photos' EXIF) and
-    ``objective`` (calibration.px_to_um).
+    ``objective`` (calibration.px_to_um). ``fit``: the function drawn through
+    each branch (see plot_report).
     """
     output_dir = output_root(output_dir)
     results_path = find_results_csv(results or name, output_dir)
@@ -388,11 +407,12 @@ def main_report(name, ramp=None, results=None, output_dir=None, objective=None,
     plot_path, timeline_path = out_dir / "plots.png", out_dir / "timeline.png"
     fits_path = out_dir / "fits.csv"
     plotted = plot_report(table, info, plot_path, name, objective, theta, px_to_um,
-                          fits_csv=fits_path)
+                          fits_csv=fits_path, fit=fit)
     plot_timeline(table, info, timeline_path, name, theta, px_to_um)
     return {"table": table, "ramp_path": str(ramp_path), "results_path": str(results_path),
             "csv_path": str(csv_path), "plot_path": str(plot_path),
             "timeline_path": str(timeline_path), "fits_path": str(fits_path),
             "photos": len(table), "plotted": plotted,
             "matched_by": info["matched_by"], "power_source": info["power_source"],
-            "level": info["level"], "px_um": px_to_um, "px_source": px_source}
+            "level": info["level"], "px_um": px_to_um, "px_source": px_source,
+            "fit": fit}

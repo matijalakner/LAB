@@ -165,7 +165,23 @@ This command lines the results of `analysis folder NAME` up with a ramp.
 | `--sample` | `0.2wt` ... `1.5wt`: the angle for the pitch (default 0.8wt) |
 | `--px-um` | micrometres per pixel; overrides `--camera` / `--objective` |
 | `--input-dir` | where the photos are, to read the camera from them (default `<data>/input`) |
+| `--fit` | function fitted to each branch on the level and power axes (default `auto`, see below) |
 | `--camera-offset` | seconds added to the photo times when they are matched by time |
+
+**Fit** (`--fit`): one fit per ramp direction (up and down separately), for distance and pitch, on the level and the power axis. Photos with a warning are left out.
+
+| `--fit` | Function |
+|---|---|
+| `linear` | `a·x + c` |
+| `quadratic` | `a·x + b·x² + c` |
+| `cubic` | `a·x + b·x² + d·x³ + c` |
+| `saturating` | `A·(1 − exp(−x/k)) + c` |
+| `power` | `a·xⁿ + c` |
+| `mm` | `A·x/(K + x) + c` (Michaelis–Menten) |
+| `auto` (default) | the one of linear, quadratic, saturating, power and mm with the lowest AICc, chosen for each branch and axis separately |
+| `none` | no fit, only the points |
+
+The nonlinear fits use only numpy: the shape parameter (k, n or K) is searched on a grid and the others are solved by least squares, so they always converge. In Python: `fit_curve(x, y, "saturating")` from `line_analysis.fits`.
 
 **Micrometres per pixel** come from `calibration.py`. It uses a value you measured with a stage micrometer when the table `PX_UM_MEASURED` has one for the camera and objective. Otherwise it calculates `pixel size / (objective × adapter)`:
 
@@ -183,8 +199,9 @@ output/report/<name>/
 │                 warning, n_lines, file
 ├── plots.png     distance and pitch against level, power (or intensity) and time;
 │                 the up and down branches of the ramp are drawn separately
-│                 with a linear fit per branch on the level and power axes
-├── fits.csv      y, x, direction, slope, intercept, r2, n of every fit
+│                 with a fit per branch on the level and power axes (--fit)
+├── fits.csv      y, x, direction, model, formula, params, slope, intercept (linear
+│                 only), slope_at_mean_x, r2, rmse, aicc, n of every fit
 └── timeline.png  level, power and pitch on the ramp's own time axis
 ```
 

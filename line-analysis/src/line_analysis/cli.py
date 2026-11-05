@@ -13,6 +13,7 @@ import sys
 
 from .calibration import CAMERA_PIXEL_UM, OBJECTIVES, PE300_W_PER_PCT, THETA
 from .detect import DetectionConfig
+from .fits import FIT_CHOICES
 from .paths import ENV_VAR, input_root, output_root
 
 _DETECTION_HELP = {
@@ -133,6 +134,12 @@ def build_parser():
     rep.add_argument("--px-um", type=float, default=None,
                      help="micrometers per pixel; overrides --camera/--objective (default: "
                           "from calibration.py for the camera and objective)")
+    rep.add_argument("--fit", choices=FIT_CHOICES, default="auto",
+                     help="function fitted to each ramp branch on the level and power "
+                          "axes: linear, quadratic, cubic, saturating (A(1-exp(-x/k))+c), "
+                          "power (a x^n + c), mm (A x/(K+x) + c), auto = the best by "
+                          "AICc of linear/quadratic/saturating/power/mm, or none "
+                          "(default auto)")
     rep.add_argument("--camera-offset", type=float, default=0.0,
                      help="seconds added to the photo times (only for matching by time)")
     add_dirs(rep)
@@ -185,13 +192,14 @@ def run(args):
         out = main_report(args.name, args.ramp, args.results, args.output_dir,
                           args.objective, args.sample, args.px_um,
                           args.camera_offset, args.liv, args.color, camera=args.camera,
-                          input_dir=args.input_dir)
+                          input_dir=args.input_dir, fit=args.fit)
         print(f"Micrometers per pixel: {out['px_um']:.4g} ({out['px_source']})")
         print(f"Ramp: {out['ramp_path']} ({out['level']})")
         print(f"{out['photos']} photos matched by {out['matched_by']}, "
               f"{out['plotted']} plotted (the others have a warning)")
         if out["power_source"]:
             print(f"Power from {out['power_source']}")
+        print(f"Fit: {out['fit']}")
         for key in ("csv_path", "plot_path", "fits_path", "timeline_path"):
             print(f"  {out[key]}")
 
