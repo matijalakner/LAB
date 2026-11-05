@@ -13,6 +13,7 @@ def lab(tmp_path, monkeypatch):
         (lab / d).mkdir(parents=True)
     monkeypatch.setattr(paths, "_REPO", lab / "line-analysis")
     monkeypatch.delenv(paths.ENV_VAR, raising=False)
+    monkeypatch.delenv(paths.SHARED_ENV_VAR, raising=False)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
@@ -31,13 +32,28 @@ def test_environment_variable_wins(lab, tmp_path, monkeypatch):
     assert paths.data_dir() == tmp_path / "other"
 
 
-def test_fallback_is_the_current_folder(tmp_path, monkeypatch):
+def test_fallback_is_data_in_the_current_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "_REPO", tmp_path / "nowhere" / "line-analysis")
     monkeypatch.delenv(paths.ENV_VAR, raising=False)
+    monkeypatch.delenv(paths.SHARED_ENV_VAR, raising=False)
     monkeypatch.chdir(tmp_path)
-    assert paths.data_dir() == paths.Path(".")
-    (tmp_path / "data" / "input").mkdir(parents=True)
-    assert paths.data_dir() == tmp_path / "data"
+    assert paths.data_dir() == paths.Path("data")
+    assert paths.input_root() == paths.Path("data/input")
+    assert paths.output_root() == paths.Path("data/output")
+
+
+def test_equipment_variable_is_shared(tmp_path, monkeypatch):
+    monkeypatch.delenv(paths.ENV_VAR, raising=False)
+    monkeypatch.setenv(paths.SHARED_ENV_VAR, str(tmp_path / "eq"))
+    assert paths.data_dir() == tmp_path / "eq"
+
+
+def test_same_folders_as_equipment(lab, monkeypatch):
+    eq_paths = pytest.importorskip("equipment.paths")
+    monkeypatch.setattr(eq_paths, "_PACKAGE_DIR", lab / "equipment")
+    monkeypatch.delenv(eq_paths.ENV_VAR, raising=False)
+    assert eq_paths.input_root() == paths.input_root() == lab / "data" / "input"
+    assert eq_paths.output_root() == paths.output_root() == lab / "data" / "output"
 
 
 def test_folder_command_reads_and_writes_in_lab_data(lab):

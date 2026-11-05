@@ -51,10 +51,11 @@ It can share an environment with `equipment`; neither package needs the other.
 
 `analysis` reads and writes in `LAB/data`, wherever you run it from. The data folder is the first of:
 
-1. `--data-dir PATH` (before the command: `analysis --data-dir D:/run2 folder s1`), or the environment variable `LINE_ANALYSIS_DATA`;
-2. `data/` next to the `line-analysis` folder, which is `LAB/data`. This needs the editable install (`pip install -e .`), because the package finds its own folder;
-3. `data/` in the current folder;
-4. the current folder itself (plain `input/` and `output/`).
+1. `--data-dir DIR` (before the command: `analysis --data-dir DIR folder ...`), or the environment variable `LINE_ANALYSIS_DATA`, or `EQUIPMENT_DATA` (the one `equipment` uses, so one setting serves both);
+2. `data/` next to the line-analysis folder (`LAB/data`);
+3. `data/` in the current folder.
+
+These are the same rules `equipment` uses, so photos are always under `data/input` and logs and results under `data/output`, and both commands find the same folder.
 
 Inside it, photos and videos come from `<data>/input`. Equipment logs are read from `<data>/output`, and the results are written to `<data>/output` too. `--input-dir` / `--output-dir` on a command override each one separately.
 

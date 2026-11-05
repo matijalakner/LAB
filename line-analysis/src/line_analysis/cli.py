@@ -62,8 +62,9 @@ def build_parser():
                     "'equipment' and relate their spacing to the light-source ramp.")
     p.add_argument("--debug", action="store_true", help="show the full traceback on errors")
     p.add_argument("--data-dir", default=None,
-                   help="folder with equipment's input/ and output/ (default: $LINE_ANALYSIS_DATA, "
-                        "else 'data' next to the line-analysis folder, else ./data, else .)")
+                   help="folder with equipment's input/ and output/ (default: $LINE_ANALYSIS_DATA "
+                        "or $EQUIPMENT_DATA, else LAB/data next to the line-analysis "
+                        "folder, else ./data)")
     sub = p.add_subparsers(dest="command", required=True)
 
     img = sub.add_parser("image", help="Detect the lines in one photo.")
