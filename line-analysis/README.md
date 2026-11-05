@@ -152,18 +152,29 @@ This command lines the results of `analysis folder NAME` up with a ramp.
 1. **Photo log**: the photo's row in `<ramp>_photos.csv`, with the level, step, cycle and direction recorded when it was taken.
 2. **Time**: if a photo is not in the photo log (for example, a separate time-lapse during the ramp), its time from `results.csv` is compared with the ramp's time stamp. Only photos taken while the ramp ran are kept. `--camera-offset S` corrects a camera clock that is off. It only matters when the time comes from EXIF.
 
-**Power of each photo:** it comes from the PM400 reading of the photo's step (`<ramp>_power.csv`). Without that file it comes from `--liv FILE`, interpolated at the photo's level. For a pE-300 ramp without either, `--color blue|green` gives the power on the sample from the calibration, `intensity × PE300_W_PER_PCT[--color]` (blue 6.334 µW/%, green 5.691 µW/%). For a DC2200 ramp without either, the calibrated intensity `current × COEFF[--objective]` is used.
+**Power of each photo:** it comes from the PM400 reading of the photo's step (`<ramp>_power.csv`). Without that file it comes from `--liv FILE`, interpolated at the photo's level. For a pE-300 ramp without either, `--color blue|green` gives the power on the sample from the calibration, `intensity × PE300_W_PER_PCT[--color]` (blue 6.334 µW/%, green 5.691 µW/%). For a DC2200 ramp without either, the calibrated intensity `current × COEFF[--objective]` is used. There is no 4x value in `COEFF`, so with `--objective 4x` that axis is left out.
 
 | Option | Meaning |
 |---|---|
 | `--ramp` | ramp CSV (path, or a name in `output/ramp/`) |
 | `--results` | a results CSV instead of the one of `NAME` |
 | `--liv` | LIV CSV from `equipment liv` with the same light source |
-| `--objective` | `5x`, `10x`, `20x`, `40x` (DC2200 only, default 20x) |
+| `--objective` | `4x`, `5x`, `10x`, `20x`, `40x`: sets micrometres per pixel, and for the DC2200 the intensity per ampere (default 20x) |
+| `--camera` | `auto` (default: read from the photos' EXIF), `flir` or `canon`: sets micrometres per pixel |
 | `--color` | `blue`, `green` (pE-300 only): power on the sample from the calibration when no power was measured |
 | `--sample` | `0.2wt` ... `1.5wt`: the angle for the pitch (default 0.8wt) |
-| `--px-um` | micrometres per pixel (default 0.1813) |
+| `--px-um` | micrometres per pixel; overrides `--camera` / `--objective` |
+| `--input-dir` | where the photos are, to read the camera from them (default `<data>/input`) |
 | `--camera-offset` | seconds added to the photo times when they are matched by time |
+
+**Micrometres per pixel** come from `calibration.py`. It uses a value you measured with a stage micrometer when the table `PX_UM_MEASURED` has one for the camera and objective. Otherwise it calculates `pixel size / (objective × adapter)`:
+
+| Camera | Pixel | 4x | 5x | 10x | 20x | 40x |
+|---|---|---|---|---|---|---|
+| FLIR Blackfly S (`flir`) | 4.5 µm | 1.125 | 0.9 | 0.45 | 0.225 | 0.1125 |
+| Canon EOS R10 (`canon`) | 3.72 µm | 0.93 | 0.744 | 0.372 | 0.1813 (measured) | 0.093 |
+
+These assume a 1× camera adapter. If yours is different (e.g. 0.5×), change `CAMERA_ADAPTER`. When you calibrate with a stage micrometer, add the value to `PX_UM_MEASURED`, e.g. `("flir", "10x"): 0.447,`. The report prints the value it used and where it came from. The camera is read from the photos: `equipment` writes `Teledyne FLIR` or the Canon's own `Canon` into each photo's EXIF.
 
 ```text
 output/report/<name>/

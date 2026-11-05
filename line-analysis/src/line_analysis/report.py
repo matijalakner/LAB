@@ -22,11 +22,12 @@ DC2200 ramp the calibrated intensity ``current * COEFF[objective]`` is added.
 """
 from pathlib import Path
 
-from .paths import output_root
+from .paths import input_root, output_root
 import numpy as np
 import pandas as pd
 
-from .calibration import COEFF, PE300_W_PER_PCT, PX_TO_UM, THETA
+from .calibration import COEFF, OBJECTIVES, PE300_W_PER_PCT, PX_TO_UM, THETA
+from .calibration import px_to_um as calibrated_px_to_um
 from .logs import LEVELS, companion, level_column, ramp_files, read_log, read_ramp
 
 BASE_COLUMNS = ["time[s]", "step", "cycle", "direction"]
@@ -173,9 +174,13 @@ def acquire(ramp_csv, results_csv, camera_offset_s=0.0, liv=None, objective=None
         table["power[W]"] = level * PE300_W_PER_PCT[color]
         power_source = f"pE-300 {color} calibration ({PE300_W_PER_PCT[color]:.4g} W/%)"
     if col == "current_A" and objective:
-        if objective not in COEFF:
-            raise ValueError(f"unknown objective '{objective}'; choose from {sorted(COEFF)}")
-        table["intensity[W/um2]"] = level * COEFF[objective]
+        if objective not in OBJECTIVES:
+            raise ValueError(f"unknown objective '{objective}'; choose from {OBJECTIVES}")
+        if objective in COEFF:
+            table["intensity[W/um2]"] = level * COEFF[objective]
+        else:
+            print(f"  note: no DC2200 intensity calibration for {objective} "
+                  f"(calibration.COEFF has {', '.join(sorted(COEFF))}); intensity axis left out")
 
     extra = [c for c in ("power[W]", "intensity[W/um2]") if c in table]
     table = table[BASE_COLUMNS + [label] + extra + RESULT_COLUMNS]
@@ -314,16 +319,61 @@ def plot_timeline(table, info, out_png, name="", theta="0.8wt", px_to_um=PX_TO_U
     finish(fig, out_png)
 
 
-def main_report(name, ramp=None, results=None, output_dir=None, objective="20x",
-                theta="0.8wt", px_to_um=PX_TO_UM, camera_offset_s=0.0, liv=None,
-                color=None):
+def detect_camera(photo_dir, files):
+    """'flir' or 'canon' from the EXIF Make of the first readable photo, else None."""
+    from PIL import Image
+    for f in list(files)[:5]:
+        path = Path(photo_dir) / f
+        try:
+            with Image.open(path) as im:
+                make = str(im.getexif().get(0x010F, "")).lower()
+        except Exception:
+            continue
+        if "flir" in make or "teledyne" in make:
+            return "flir"
+        if "canon" in make:
+            return "canon"
+    return None
+
+
+def choose_px_to_um(px_to_um=None, camera=None, objective=None, photo_dir=None, files=()):
+    """Micrometers per pixel -> (value, how it was found).
+
+    An explicit px_to_um wins; else the calibration table for the camera (given,
+    or read from the photos' EXIF) and the objective (default 20x).
+    """
+    if px_to_um is not None:
+        return float(px_to_um), "given with --px-um"
+    if camera in (None, "auto"):
+        camera = detect_camera(photo_dir, files) if photo_dir else None
+        found = "camera from the photos"
+    else:
+        found = "camera given"
+    if camera is None:
+        return PX_TO_UM, ("camera unknown, old default (Canon, 20x); pass --camera and "
+                          "--objective, or --px-um")
+    value, how = calibrated_px_to_um(camera, objective or "20x")
+    if objective is None:
+        how += "; objective not given, 20x assumed (pass --objective)"
+    return value, f"{how}; {found}"
+
+
+def main_report(name, ramp=None, results=None, output_dir=None, objective=None,
+                theta="0.8wt", px_to_um=None, camera_offset_s=0.0, liv=None,
+                color=None, camera="auto", input_dir=None):
     """Align, save and plot -> <output_dir>/report/<name>/data.csv, plots.png, timeline.png.
 
     ``results`` defaults to ``name`` (the folder name used with 'analysis folder').
+    Micrometers per pixel: ``px_to_um`` if given, else from the calibration table
+    for ``camera`` ('flir', 'canon', or 'auto' = from the photos' EXIF) and
+    ``objective`` (calibration.px_to_um).
     """
     output_dir = output_root(output_dir)
     results_path = find_results_csv(results or name, output_dir)
     files = pd.read_csv(results_path)["file"].astype(str)
+    photo_dir = input_root(input_dir) / "folder" / Path(name).name
+    px_to_um, px_source = choose_px_to_um(px_to_um, camera, objective, photo_dir, files)
+    objective = objective or "20x"
     ramp_path = find_ramp_csv(ramp, output_dir, files)
     table, info = acquire(ramp_path, results_path, camera_offset_s, liv, objective,
                           color)
@@ -345,4 +395,4 @@ def main_report(name, ramp=None, results=None, output_dir=None, objective="20x",
             "timeline_path": str(timeline_path), "fits_path": str(fits_path),
             "photos": len(table), "plotted": plotted,
             "matched_by": info["matched_by"], "power_source": info["power_source"],
-            "level": info["level"]}
+            "level": info["level"], "px_um": px_to_um, "px_source": px_source}
