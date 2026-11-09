@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from .detect import check_config
+from .detect import DetectionConfig, check_config
 from .image import analyse_image, load_image
 from .logs import PHOTO_SUFFIXES, capture_times, resolve_folder
 from .spacing import spacing_stats
@@ -138,7 +138,7 @@ def _describe(config):
 
 
 def choose_parameters(first_photo, out_dir, base=None, interactive=True,
-                      show=True, ask=input):
+                      show=True, ask=input, middle=None):
     """Tune the detection settings on one photo and let the user confirm them.
 
     The photo is analysed with the best suggestion of the tuner and the marked
@@ -154,7 +154,7 @@ def choose_parameters(first_photo, out_dir, base=None, interactive=True,
     tuner's status ("ok", "check", "base", "fallback") or "manual".
     """
     first_photo, out_dir = Path(first_photo), Path(out_dir)
-    img = load_image(first_photo)
+    img = load_image(first_photo, middle)
     cands = tune_candidates(img, base, extended=False)   # other strip heights only if asked for
     extended = False
     if not interactive:
@@ -165,7 +165,7 @@ def choose_parameters(first_photo, out_dir, base=None, interactive=True,
     attempt = 0
     while True:
         attempt += 1
-        res = analyse_image(first_photo, tuning_dir, config, write_csv=False)
+        res = analyse_image(first_photo, tuning_dir, config, write_csv=False, middle=middle)
         marked = tuning_dir / f"try{attempt}_{first_photo.stem}_marked.png"
         Path(res["marked_path"]).replace(marked)
         stats = spacing_stats(res["lines"])
@@ -294,7 +294,8 @@ def _mark_tracked(img, lines, missing, half_width):
     return marked
 
 
-def track_folder(photos, out_dir, config, tracking=None, reference=None, workers=None):
+def track_folder(photos, out_dir, config, tracking=None, reference=None, workers=None,
+                 middle=None):
     """Analyse photos in order, each searched around the lines of the previous one.
 
     The first photo is detected normally (or ``reference`` is used as its
@@ -315,7 +316,7 @@ def track_folder(photos, out_dir, config, tracking=None, reference=None, workers
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def load(photo):
-        img = load_image(photo)
+        img = load_image(photo, middle)
         sig, _, min_dist, x_tol = compute_signal(img, config)
         return img, sig, x_tol, min_dist
 
@@ -386,6 +387,7 @@ def track_folder(photos, out_dir, config, tracking=None, reference=None, workers
 
 STRIP_PARTS = 5        # strips of the first photo and the last photo of each of 5 equal parts
 STRIP_HEIGHT = 100     # rows around the middle of the photo
+MIDDLE_HEIGHT = 300    # rows of every photo analysed by main_folder(middle_strips=True)
 
 
 def strip_positions(n_photos, parts=STRIP_PARTS):
@@ -426,7 +428,8 @@ def save_strips(photos, out_dir, parts=STRIP_PARTS, height=STRIP_HEIGHT, workers
 
 
 def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
-                interactive=True, show=True, ask=input, config=None, tracking=None):
+                interactive=True, show=True, ask=input, config=None, tracking=None,
+                middle_strips=False):
     """Analyse every photo of a folder and write <output_dir>/folder/<name>/results.csv.
 
     ``path`` is a folder or a measurement name (<input_dir>/folder/<name>). The
@@ -444,6 +447,12 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
     the previous one. Photos where a line is missing are reported (warning)
     and the next photo is searched around the last good positions. The
     details go to tracking.csv.
+
+    ``middle_strips`` cuts the middle 300 rows out of every photo and analyses
+    only those, all 300 of them, with the same algorithm. Everything goes to
+    <output_dir>/folder/<name>/middle_300/, and the marked pictures are 300 rows
+    high. A photo with fewer rows gets a "failed" warning.
+
     Returns the result rows, or [] if you quit.
     """
     output_dir = output_root(output_dir)
@@ -451,14 +460,20 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
     folder = resolve_folder(path, input_dir)
     photos, times = get_sorted_photos(folder, output_dir)
     out_dir = Path(output_dir) / "folder" / folder.name
+    middle, base = None, None
+    if middle_strips:
+        middle, base = MIDDLE_HEIGHT, DetectionConfig(strip_height=0)
+        out_dir = out_dir / f"middle_{MIDDLE_HEIGHT}"
+        if config is not None:
+            config = dataclasses.replace(config, strip_height=0)
 
     if config is not None:
         check_config(config)
         tuning = {"status": "given"}
     else:
         try:
-            chosen = choose_parameters(photos[0], out_dir, interactive=interactive,
-                                       show=show, ask=ask)
+            chosen = choose_parameters(photos[0], out_dir, base, interactive=interactive,
+                                       show=show, ask=ask, middle=middle)
         except EOFError:
             print("\nNo input available (is stdin closed?). Use --yes to run without asking.")
             return []
@@ -477,14 +492,15 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
     sources = sorted({times[p][1] for p in photos})
     print(f"\nAnalysing {len(photos)} photos with: {_describe(config)}")
     print(f"Photo times from: {', '.join(sources)}")
-    save_strips(photos, out_dir)
+    if middle is None:
+        save_strips(photos, out_dir)
     if tracking:
         return _finish_tracked(photos, times, out_dir, config, tracking,
                                tuning.get("approved_lines"), window, z_max,
-                               tuning["status"] == "fallback")
+                               tuning["status"] == "fallback", middle)
 
     def work(photo):
-        res = analyse_image(photo, out_dir, config, write_csv=False)
+        res = analyse_image(photo, out_dir, config, write_csv=False, middle=middle)
         return res["lines"], spacing_stats(res["lines"])
 
     # decoding, the median filters and the PNG encoder release the GIL, so threads help
@@ -520,14 +536,14 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
 
 
 def _finish_tracked(photos, times, out_dir, config, tracking, reference, window, z_max,
-                    tuning_failed):
+                    tuning_failed, middle=None):
     """main_folder with line tracking: results.csv, tracking.csv and warnings."""
     if reference:
         tol = (f"{tracking.x_tolerance:g} px" if tracking.x_tolerance
                else "20 % of the spacing")
         print(f"Tracking {len(reference)} lines: search +-{tol}, then "
               f"+-half the spacing; contrast steps {list(tracking.contrast_steps)}")
-    recs = track_folder(photos, out_dir, config, tracking, reference)
+    recs = track_folder(photos, out_dir, config, tracking, reference, middle=middle)
     rows, track_rows = [], []
     fmt = lambda xs: " ".join(f"{x:.1f}" for x in xs)
     for n, rec in enumerate(recs, start=1):

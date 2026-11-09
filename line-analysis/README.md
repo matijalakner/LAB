@@ -127,6 +127,20 @@ The strips are cut from the original photos (full width, no marks), for the firs
 
 `warning` is filled in when a photo has fewer than 2 lines, a different line count from its neighbours, or an unusual spread of spacings. `time_stamp` is UTC.
 
+#### Middle strips (`--middle-strips`)
+
+`analysis folder NAME --middle-strips` cuts the middle 300 rows out of every photo and analyses only those, all 300 of them, with the same detection. The tuning also runs on the strip, and `--track` and the detection options work as usual. Every marked picture is 300 px high, at the full width of the photo, and has the red lines found in that strip. A photo with fewer than 300 rows gets a `failed` warning.
+
+```text
+output/folder/<name>/middle_300/
+├── results.csv       same columns as above
+├── parameters.json   the settings used (strip_height 0 = the whole 300 px strip)
+├── tuning/           every tuning attempt
+└── <photo>_marked.png
+```
+
+To use these results in a report: `analysis report NAME --results output/folder/NAME/middle_300/results.csv`.
+
 #### Line tracking (`--track`)
 
 With `--track`, only the first photo is detected freely. Every later photo is searched around the lines of the photo before it:

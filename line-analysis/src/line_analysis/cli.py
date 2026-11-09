@@ -100,6 +100,9 @@ def build_parser():
     fol.add_argument("--no-show", action="store_true", help="do not open the image viewer")
     fol.add_argument("--window", type=int, default=7,
                      help="neighbouring photos compared for the warnings (default 7)")
+    fol.add_argument("--middle-strips", action="store_true",
+                     help="analyse only the middle 300 px of every photo and write the marked "
+                          "300 px strips to <output-dir>/folder/NAME/middle_300/")
     trk = fol.add_argument_group("line tracking")
     trk.add_argument("--track", action="store_true",
                      help="search every photo only around the lines of the previous one "
@@ -186,7 +189,8 @@ def run(args):
             tracking = TrackingConfig(x_tolerance=args.x_tolerance, contrast_steps=steps)
         main_folder(args.path, args.output_dir, args.input_dir, window=args.window,
                     interactive=not args.yes, show=not args.no_show,
-                    config=config_from_args(args), tracking=tracking)
+                    config=config_from_args(args), tracking=tracking,
+                    middle_strips=args.middle_strips)
     elif args.command == "report":
         from .report import main_report
         out = main_report(args.name, args.ramp, args.results, args.output_dir,

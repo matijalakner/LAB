@@ -8,7 +8,23 @@ from PIL import Image
 from .detect import DetectionConfig, detect_lines, mark_image, plot_line_signal
 
 
-def load_image(path):
+def load_image(path, middle=None):
+    """An image file as an 8-bit RGB array (H x W x 3).
+
+    ``middle`` keeps only that many rows around the middle of the photo, and a
+    photo with fewer rows raises ValueError. See _read_image for the formats.
+    """
+    img = _read_image(path)
+    if middle is None:
+        return img
+    height = img.shape[0]
+    if height < middle:
+        raise ValueError(f"photo has only {height} rows, {middle} needed")
+    r0 = (height - middle) // 2
+    return img[r0:r0 + middle]
+
+
+def _read_image(path):
     """An image file as an 8-bit RGB array (H x W x 3).
 
     Handles what the cameras write: JPEG, 8-bit PNG/TIFF, and the 16-bit
@@ -36,7 +52,7 @@ def load_image(path):
 
 
 def analyse_image(image_path, out_dir, config=None, plot=False, write_csv=True,
-                  save_marked=True):
+                  save_marked=True, middle=None):
     """Detect the vertical lines in one image file and save the results.
 
     Writes into ``out_dir`` (created if needed):
@@ -44,11 +60,13 @@ def analyse_image(image_path, out_dir, config=None, plot=False, write_csv=True,
         <name>_lines.csv    line, x_px, spacing_px      (write_csv=True)
         <name>_signal.png   line-strength plot          (plot=True)
 
+    ``middle`` analyses and writes only that many rows around the middle.
+
     Returns a dict with the line positions and the written paths.
     """
     config = config or DetectionConfig()
     image_path, out_dir = Path(image_path), Path(out_dir)
-    img = load_image(image_path)
+    img = load_image(image_path, middle)
     out_dir.mkdir(parents=True, exist_ok=True)
     height, width = img.shape[:2]
     xs, sig, threshold = detect_lines(img, config)

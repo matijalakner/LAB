@@ -196,3 +196,31 @@ def test_folder_saves_the_middle_strips_of_evenly_spread_photos(dirs):
     assert [p.name for p in strips] == [f"st_{i:04d}_strip.png" for i in (0, 1, 4, 6, 9, 11)]
     source = np.asarray(Image.open(inp / "folder" / "st" / "st_0006.png").convert("RGB"))
     assert np.array_equal(np.asarray(Image.open(strips[3])), source[100:200])
+
+
+@pytest.mark.parametrize("track", [False, True])
+def test_middle_strips_are_300_px_with_the_lines_marked(dirs, track):
+    inp, out = dirs
+    for i in range(4):
+        save_photo(inp / "folder" / "m" / f"m_{i:04d}.png", 80, height=701, seed=i)
+    rows = main_folder("m", out, inp, interactive=False, show=False, tracking=track or None,
+                       middle_strips=True)
+    target = out / "folder" / "m" / "middle_300"
+    assert [r[4] for r in rows] == [8] * 4 and all(r[6] == "" for r in rows)
+    assert len(results(out, "m/middle_300")) == 4
+    assert not (out / "folder" / "m" / "strips").exists()
+    source = np.asarray(Image.open(inp / "folder" / "m" / "m_0002.png").convert("RGB"))
+    for i in range(4):
+        marked = np.asarray(Image.open(target / f"m_{i:04d}_marked.png"))
+        assert marked.shape[:2] == (300, 800)
+    marked = np.asarray(Image.open(target / "m_0002_marked.png"))
+    painted = np.any(marked != source[200:500], axis=(0, 2))
+    assert painted.sum() > 0 and marked[0, 40].tolist() == [255, 0, 0]
+
+
+def test_middle_strips_warn_about_a_photo_that_is_too_low(dirs):
+    inp, out = dirs
+    for i, h in enumerate((400, 400, 200, 400)):
+        save_photo(inp / "folder" / "low" / f"low_{i}.png", 80, height=h, seed=i)
+    rows = main_folder("low", out, inp, interactive=False, show=False, middle_strips=True)
+    assert "failed: photo has only 200 rows" in rows[2][6]
