@@ -109,8 +109,8 @@ This command reads `output/video/<name>/lines.csv`. It writes `spacing.csv` (`ti
 `NAME` is the measurement name (`input/folder/NAME`) or any folder of photos. Videos in the folder are ignored.
 
 1. The photos are sorted by capture time. The time comes from the equipment capture or photo log when the photo is listed there (`log`), else from EXIF (`exif`), else from the file (`file`).
-2. The first photo tunes the detection settings. The marked photo opens; answer `y` to keep the settings, `n` to see the next suggestion, or type settings such as `k=4 strip_height=400`.
-3. Every photo is analysed with the confirmed settings.
+2. The first photo tunes the detection settings. The marked photo opens; answer `y` to keep the settings, `n` to see the next suggestion, or type settings such as `k=4 rel=0.2`.
+3. The middle 300 rows of every photo are cut out and analysed, all 300 of them, with the confirmed settings. The tuning in step 2 also runs on this strip.
 
 `--yes` uses the first suggestion without asking. Detection options on the command line (`--k 4` ...) skip the tuning. `--no-show` keeps the image viewer closed, and `--window N` sets how many neighbours each photo is compared with for the warnings.
 
@@ -119,27 +119,18 @@ output/folder/<name>/
 ├── results.csv       time_stamp, photo, file, mean_spacing_px, n_lines, std_spacing_px, warning, time_source
 ├── parameters.json   the settings used
 ├── tuning/           every tuning attempt
-├── strips/           <photo>_strip.png: the middle 100 px rows of 6 evenly spread photos
-└── <photo>_marked.png
+└── <photo>_marked.png   the middle 300 px at the full width, lines painted red
 ```
 
-The strips are cut from the original photos (full width, no marks), for the first photo and the last photo of each fifth of the series, in capture order: 100 photos give photos 1, 20, 40, 60, 80 and 100.
+A photo with fewer than 300 rows gets a `failed` warning.
+
+#### Whole photos (`--full-image`)
+
+`analysis folder NAME --full-image` analyses the whole photos with the `strip_height` setting. The files above go to `output/folder/NAME/full_image/`, with marked pictures of the full size. To use them in a report: `analysis report NAME --results output/folder/NAME/full_image/results.csv`.
+
+This mode also writes `strips/<photo>_strip.png`: the middle 100 px rows of 6 evenly spread photos. They are cut from the original photos (full width, no marks), for the first photo and the last photo of each fifth of the series, in capture order: 100 photos give photos 1, 20, 40, 60, 80 and 100.
 
 `warning` is filled in when a photo has fewer than 2 lines, a different line count from its neighbours, or an unusual spread of spacings. `time_stamp` is UTC.
-
-#### Middle strips (`--middle-strips`)
-
-`analysis folder NAME --middle-strips` cuts the middle 300 rows out of every photo and analyses only those, all 300 of them, with the same detection. The tuning also runs on the strip, and `--track` and the detection options work as usual. Every marked picture is 300 px high, at the full width of the photo, and has the red lines found in that strip. A photo with fewer than 300 rows gets a `failed` warning.
-
-```text
-output/folder/<name>/middle_300/
-├── results.csv       same columns as above
-├── parameters.json   the settings used (strip_height 0 = the whole 300 px strip)
-├── tuning/           every tuning attempt
-└── <photo>_marked.png
-```
-
-To use these results in a report: `analysis report NAME --results output/folder/NAME/middle_300/results.csv`.
 
 #### Line tracking (`--track`)
 

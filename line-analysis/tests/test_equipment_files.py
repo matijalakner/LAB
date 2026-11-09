@@ -191,8 +191,8 @@ def test_folder_saves_the_middle_strips_of_evenly_spread_photos(dirs):
     inp, out = dirs
     for i in range(12):
         save_photo(inp / "folder" / "st" / f"st_{i:04d}.png", 80, height=301, seed=i)
-    main_folder("st", out, inp, interactive=False, show=False)
-    strips = sorted((out / "folder" / "st" / "strips").iterdir())
+    main_folder("st", out, inp, interactive=False, show=False, middle_strips=False)
+    strips = sorted((out / "folder" / "st" / "full_image" / "strips").iterdir())
     assert [p.name for p in strips] == [f"st_{i:04d}_strip.png" for i in (0, 1, 4, 6, 9, 11)]
     source = np.asarray(Image.open(inp / "folder" / "st" / "st_0006.png").convert("RGB"))
     assert np.array_equal(np.asarray(Image.open(strips[3])), source[100:200])
@@ -203,12 +203,11 @@ def test_middle_strips_are_300_px_with_the_lines_marked(dirs, track):
     inp, out = dirs
     for i in range(4):
         save_photo(inp / "folder" / "m" / f"m_{i:04d}.png", 80, height=701, seed=i)
-    rows = main_folder("m", out, inp, interactive=False, show=False, tracking=track or None,
-                       middle_strips=True)
-    target = out / "folder" / "m" / "middle_300"
+    rows = main_folder("m", out, inp, interactive=False, show=False, tracking=track or None)
+    target = out / "folder" / "m"
     assert [r[4] for r in rows] == [8] * 4 and all(r[6] == "" for r in rows)
-    assert len(results(out, "m/middle_300")) == 4
-    assert not (out / "folder" / "m" / "strips").exists()
+    assert len(results(out, "m")) == 4
+    assert not (target / "strips").exists()
     source = np.asarray(Image.open(inp / "folder" / "m" / "m_0002.png").convert("RGB"))
     for i in range(4):
         marked = np.asarray(Image.open(target / f"m_{i:04d}_marked.png"))
@@ -222,5 +221,15 @@ def test_middle_strips_warn_about_a_photo_that_is_too_low(dirs):
     inp, out = dirs
     for i, h in enumerate((400, 400, 200, 400)):
         save_photo(inp / "folder" / "low" / f"low_{i}.png", 80, height=h, seed=i)
-    rows = main_folder("low", out, inp, interactive=False, show=False, middle_strips=True)
+    rows = main_folder("low", out, inp, interactive=False, show=False)
     assert "failed: photo has only 200 rows" in rows[2][6]
+
+
+def test_full_image_mode_keeps_the_marked_photos_at_full_size(dirs):
+    inp, out = dirs
+    for i in range(3):
+        save_photo(inp / "folder" / "f" / f"f_{i}.png", 80, height=701, seed=i)
+    main_folder("f", out, inp, interactive=False, show=False, middle_strips=False)
+    marked = Image.open(out / "folder" / "f" / "full_image" / "f_1_marked.png")
+    assert marked.size == (800, 701)
+    assert not (out / "folder" / "f" / "results.csv").exists()

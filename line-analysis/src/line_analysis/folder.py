@@ -387,7 +387,7 @@ def track_folder(photos, out_dir, config, tracking=None, reference=None, workers
 
 STRIP_PARTS = 5        # strips of the first photo and the last photo of each of 5 equal parts
 STRIP_HEIGHT = 100     # rows around the middle of the photo
-MIDDLE_HEIGHT = 300    # rows of every photo analysed by main_folder(middle_strips=True)
+MIDDLE_HEIGHT = 300    # rows of every photo analysed by main_folder (unless middle_strips=False)
 
 
 def strip_positions(n_photos, parts=STRIP_PARTS):
@@ -429,7 +429,7 @@ def save_strips(photos, out_dir, parts=STRIP_PARTS, height=STRIP_HEIGHT, workers
 
 def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
                 interactive=True, show=True, ask=input, config=None, tracking=None,
-                middle_strips=False):
+                middle_strips=True):
     """Analyse every photo of a folder and write <output_dir>/folder/<name>/results.csv.
 
     ``path`` is a folder or a measurement name (<input_dir>/folder/<name>). The
@@ -438,7 +438,6 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
     other settings. ``config`` skips the tuning and uses those settings. Every
     photo is then analysed with the confirmed settings (saved to
     parameters.json). Unusual photos get a text in ``warning`` (flag_unusual).
-    The middle 100 rows of 6 evenly spread photos go to strips/ (save_strips).
     interactive=False uses the first suggestion without asking.
 
     ``tracking`` (a TrackingConfig, or True for the defaults) switches to line
@@ -448,10 +447,12 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
     and the next photo is searched around the last good positions. The
     details go to tracking.csv.
 
-    ``middle_strips`` cuts the middle 300 rows out of every photo and analyses
-    only those, all 300 of them, with the same algorithm. Everything goes to
-    <output_dir>/folder/<name>/middle_300/, and the marked pictures are 300 rows
-    high. A photo with fewer rows gets a "failed" warning.
+    By default the middle 300 rows are cut out of every photo and only those,
+    all 300 of them, are analysed; the marked pictures are 300 rows high and a
+    photo with fewer rows gets a "failed" warning. ``middle_strips=False``
+    analyses the whole photos with config.strip_height instead, writes to
+    <output_dir>/folder/<name>/full_image/, and saves the middle 100 rows of
+    6 evenly spread photos to strips/ there (save_strips).
 
     Returns the result rows, or [] if you quit.
     """
@@ -463,9 +464,10 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
     middle, base = None, None
     if middle_strips:
         middle, base = MIDDLE_HEIGHT, DetectionConfig(strip_height=0)
-        out_dir = out_dir / f"middle_{MIDDLE_HEIGHT}"
         if config is not None:
             config = dataclasses.replace(config, strip_height=0)
+    else:
+        out_dir = out_dir / "full_image"
 
     if config is not None:
         check_config(config)
