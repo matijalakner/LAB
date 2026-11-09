@@ -3,12 +3,13 @@ import csv
 import json
 
 import numpy as np
+from PIL import Image
 import pandas as pd
 import pytest
 
 from line_analysis import cli
 from line_analysis.calibration import COEFF, PE300_W_PER_PCT
-from line_analysis.folder import main_folder
+from line_analysis.folder import main_folder, strip_positions
 from line_analysis.report import main_report
 from conftest import save_photo, write_log
 
@@ -176,3 +177,22 @@ def test_cli_errors_are_one_line(capsys):
         cli.main(["image", "does_not_exist_0000.jpg"])
     assert e.value.code == 1
     assert capsys.readouterr().err.startswith("error: File not found")
+
+
+def test_strip_positions():
+    assert strip_positions(100) == [1, 20, 40, 60, 80, 100]
+    assert strip_positions(200) == [1, 40, 80, 120, 160, 200]
+    assert strip_positions(12) == [1, 2, 5, 7, 10, 12]
+    assert strip_positions(3) == [1, 2, 3]
+    assert strip_positions(1) == [1]
+
+
+def test_folder_saves_the_middle_strips_of_evenly_spread_photos(dirs):
+    inp, out = dirs
+    for i in range(12):
+        save_photo(inp / "folder" / "st" / f"st_{i:04d}.png", 80, height=301, seed=i)
+    main_folder("st", out, inp, interactive=False, show=False)
+    strips = sorted((out / "folder" / "st" / "strips").iterdir())
+    assert [p.name for p in strips] == [f"st_{i:04d}_strip.png" for i in (0, 1, 4, 6, 9, 11)]
+    source = np.asarray(Image.open(inp / "folder" / "st" / "st_0006.png").convert("RGB"))
+    assert np.array_equal(np.asarray(Image.open(strips[3])), source[100:200])

@@ -119,8 +119,11 @@ output/folder/<name>/
 ├── results.csv       time_stamp, photo, file, mean_spacing_px, n_lines, std_spacing_px, warning, time_source
 ├── parameters.json   the settings used
 ├── tuning/           every tuning attempt
+├── strips/           <photo>_strip.png: the middle 100 px rows of 6 evenly spread photos
 └── <photo>_marked.png
 ```
+
+The strips are cut from the original photos (full width, no marks), for the first photo and the last photo of each fifth of the series, in capture order: 100 photos give photos 1, 20, 40, 60, 80 and 100.
 
 `warning` is filled in when a photo has fewer than 2 lines, a different line count from its neighbours, or an unusual spread of spacings. `time_stamp` is UTC.
 

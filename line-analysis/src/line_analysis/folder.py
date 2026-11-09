@@ -384,6 +384,47 @@ def track_folder(photos, out_dir, config, tracking=None, reference=None, workers
     return results
 
 
+STRIP_PARTS = 5        # strips of the first photo and the last photo of each of 5 equal parts
+STRIP_HEIGHT = 100     # rows around the middle of the photo
+
+
+def strip_positions(n_photos, parts=STRIP_PARTS):
+    """Photo numbers (from 1) that get a strip: 100 photos give 1, 20, 40, 60, 80, 100."""
+    return sorted({max(1, (2 * k * n_photos + parts) // (2 * parts)) for k in range(parts + 1)})
+
+
+def save_strips(photos, out_dir, parts=STRIP_PARTS, height=STRIP_HEIGHT, workers=None):
+    """Save the middle rows of evenly spread photos as <out_dir>/strips/<photo>_strip.png.
+
+    The photos are the ones of strip_positions, in capture order. The strips
+    are cut from the originals (full width, no marks). A photo lower than
+    ``height`` is saved whole. A photo that cannot be read is reported and skipped. Returns
+    the written paths.
+    """
+    strips_dir = Path(out_dir) / "strips"
+    strips_dir.mkdir(parents=True, exist_ok=True)
+
+    def save(photo):
+        img = load_image(photo)
+        r0 = max(0, (img.shape[0] - height) // 2)
+        path = strips_dir / f"{photo.stem}_strip.png"
+        Image.fromarray(img[r0:r0 + height]).save(path, compress_level=1)
+        return path
+
+    photos = list(photos)
+    chosen = [photos[n - 1] for n in strip_positions(len(photos), parts)]
+    workers = workers or max(1, min(4, os.cpu_count() or 1, len(chosen)))
+    written = []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for photo, fut in [(p, pool.submit(save, p)) for p in chosen]:
+            try:
+                written.append(fut.result())
+            except Exception as e:
+                print(f"No strip for {photo.name}: {e}")
+    print(f"Strips ({height} px): {len(written)} in {strips_dir}")
+    return written
+
+
 def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
                 interactive=True, show=True, ask=input, config=None, tracking=None):
     """Analyse every photo of a folder and write <output_dir>/folder/<name>/results.csv.
@@ -394,6 +435,7 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
     other settings. ``config`` skips the tuning and uses those settings. Every
     photo is then analysed with the confirmed settings (saved to
     parameters.json). Unusual photos get a text in ``warning`` (flag_unusual).
+    The middle 100 rows of 6 evenly spread photos go to strips/ (save_strips).
     interactive=False uses the first suggestion without asking.
 
     ``tracking`` (a TrackingConfig, or True for the defaults) switches to line
@@ -435,6 +477,7 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
     sources = sorted({times[p][1] for p in photos})
     print(f"\nAnalysing {len(photos)} photos with: {_describe(config)}")
     print(f"Photo times from: {', '.join(sources)}")
+    save_strips(photos, out_dir)
     if tracking:
         return _finish_tracked(photos, times, out_dir, config, tracking,
                                tuning.get("approved_lines"), window, z_max,
