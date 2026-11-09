@@ -22,7 +22,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from .detect import DetectionConfig, check_config
+from . import contrast as contrast_method
+from .detect import DetectionConfig, check_config, mark_image
 from .image import analyse_image, load_image
 from .logs import PHOTO_SUFFIXES, capture_times, resolve_folder
 from .spacing import spacing_stats
@@ -429,7 +430,7 @@ def save_strips(photos, out_dir, parts=STRIP_PARTS, height=STRIP_HEIGHT, workers
 
 def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
                 interactive=True, show=True, ask=input, config=None, tracking=None,
-                middle_strips=True):
+                middle_strips=True, method="contrast", contrast=None):
     """Analyse every photo of a folder and write <output_dir>/folder/<name>/results.csv.
 
     ``path`` is a folder or a measurement name (<input_dir>/folder/<name>). The
@@ -454,6 +455,12 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
     <output_dir>/folder/<name>/full_image/, and saves the middle 100 rows of
     6 evenly spread photos to strips/ there (save_strips).
 
+    ``method="contrast"`` (the default for the middle strips) finds the lines
+    with contrast.py: no tuning, and the defects are taken from 6 evenly spread
+    photos (strip_positions). Settings in ``config``, ``tracking`` or
+    ``middle_strips=False`` use the tuned peak detection described above, as
+    does ``method="peaks"``.
+
     Returns the result rows, or [] if you quit.
     """
     output_dir = output_root(output_dir)
@@ -461,6 +468,13 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
     folder = resolve_folder(path, input_dir)
     photos, times = get_sorted_photos(folder, output_dir)
     out_dir = Path(output_dir) / "folder" / folder.name
+    if method not in ("contrast", "peaks"):
+        raise ValueError("method must be 'contrast' or 'peaks'")
+    if method == "contrast" and middle_strips and (config is not None or tracking):
+        print("Detection settings or tracking were given: using the peak detection.")
+    if method == "contrast" and middle_strips and config is None and not tracking:
+        return _finish_contrast(photos, times, out_dir, contrast or contrast_method.ContrastConfig(),
+                                window, z_max)
     middle, base = None, None
     if middle_strips:
         middle, base = MIDDLE_HEIGHT, DetectionConfig(strip_height=0)
@@ -528,6 +542,72 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
 
     rows = flag_unusual(rows, window=window, z_max=z_max,
                         tuning_failed=tuning["status"] == "fallback")
+    flagged = [r for r in rows if r[6]]
+    print(f"{len(flagged)} of {len(rows)} photos have a warning")
+    for r in flagged:
+        print(f"  photo {r[1]} ({r[2]}): {r[6]}")
+    csv_path = write_csv(out_dir / "results.csv", RESULTS_HEADER, rows)
+    print(f"Data: {csv_path}")
+    return rows
+
+
+def _finish_contrast(photos, times, out_dir, cfg, window, z_max):
+    """main_folder with the contrast detection on the middle strips."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    workers = max(1, min(4, os.cpu_count() or 1, len(photos)))
+
+    def features(photo):
+        img = load_image(photo, MIDDLE_HEIGHT)
+        profile = contrast_method.contrast_profile(img, cfg)
+        return contrast_method.find_features(profile, cfg), profile
+
+    spread = [photos[n - 1] for n in strip_positions(len(photos))]
+    found, profiles = [], []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for photo, fut in [(p, pool.submit(features, p)) for p in spread]:
+            try:
+                feats, profile = fut.result()
+                found.append(feats)
+                profiles.append(profile)
+            except Exception as e:
+                print(f"{photo.name}: not used to find defects: {e}")
+    defects = contrast_method.fixed_positions(found, profiles, cfg) if found else []
+    params = dict(dataclasses.asdict(cfg), method="contrast",
+                  defects_x=[round(x, 1) for x in defects])
+    (out_dir / "parameters.json").write_text(json.dumps(params, indent=2), encoding="utf-8")
+    print(f"\nAnalysing {len(photos)} photos by contrast, threshold {cfg.threshold:g}")
+    print(f"Photo times from: {', '.join(sorted({times[p][1] for p in photos}))}")
+    print("Defects (not counted as lines) at x = "
+          + (", ".join(f"{x:.0f}" for x in defects) if defects else "none"))
+
+    def work(photo):
+        img = load_image(photo, MIDDLE_HEIGHT)
+        feats = contrast_method.find_features(contrast_method.contrast_profile(img, cfg), cfg)
+        lines = contrast_method.select_lines(feats, defects, img.shape[1], cfg)
+        Image.fromarray(mark_image(img, lines)).save(out_dir / f"{photo.stem}_marked.png",
+                                                     compress_level=1)
+        return lines, spacing_stats(lines)
+
+    rows = []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(work, p) for p in photos]
+        for n, (photo, fut) in enumerate(zip(photos, futures), start=1):
+            warning, mean, std, n_lines = "", "", "", 0
+            try:
+                lines, stats = fut.result()
+                n_lines = len(lines)
+                if stats is None:
+                    warning = "fewer than 2 lines"
+                else:
+                    mean = round(stats[0], 3)
+                    std = "" if np.isnan(stats[1]) else round(stats[1], 3)
+            except Exception as e:
+                warning = f"failed: {e}"
+            rows.append((times[photo][0], n, photo.name, mean, n_lines, std, warning,
+                         times[photo][1]))
+            print(f"[{n}/{len(photos)}] {photo.name}: {n_lines} lines {warning}")
+
+    rows = flag_unusual(rows, window=window, z_max=z_max)
     flagged = [r for r in rows if r[6]]
     print(f"{len(flagged)} of {len(rows)} photos have a warning")
     for r in flagged:

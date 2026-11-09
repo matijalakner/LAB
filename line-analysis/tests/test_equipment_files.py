@@ -233,3 +233,33 @@ def test_full_image_mode_keeps_the_marked_photos_at_full_size(dirs):
     marked = Image.open(out / "folder" / "f" / "full_image" / "f_1_marked.png")
     assert marked.size == (800, 701)
     assert not (out / "folder" / "f" / "results.csv").exists()
+
+
+def walls(xs, defects=(), width=6000, height=500, seed=0):
+    """Photo with lines drawn as a bright peak followed by a dark dip, and dark defects."""
+    rng = np.random.default_rng(seed)
+    img = np.full((height, width, 3), 150, np.float32) + rng.normal(0, 2, (height, width, 3))
+    for x in xs:
+        img[:, x - 8:x] += 40
+        img[:, x:x + 8] -= 50
+    for x in defects:
+        img[:, x:x + 6] -= 30
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+
+def test_contrast_finds_the_zero_crossings_and_ignores_fixed_defects(dirs):
+    inp, out = dirs
+    for i in range(10):
+        xs = [600 + 650 * n + 25 * i for n in range(6)]
+        path = inp / "folder" / "w" / f"w_{i:02d}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(walls(xs, defects=[300, 5300], seed=i)).save(path)
+    rows = main_folder("w", out, inp, interactive=False, show=False)
+    assert [r[4] for r in rows] == [6] * 10
+    assert all(abs(r[3] - 650) < 2 for r in rows)
+    params = json.loads((out / "folder" / "w" / "parameters.json").read_text())
+    assert params["method"] == "contrast"
+    assert len(params["defects_x"]) == 2 and abs(params["defects_x"][0] - 303) < 10
+    marked = np.asarray(Image.open(out / "folder" / "w" / "w_00_marked.png"))
+    assert marked.shape[:2] == (300, 6000)
+    assert marked[0, 600].tolist() == [255, 0, 0] or marked[0, 599].tolist() == [255, 0, 0]

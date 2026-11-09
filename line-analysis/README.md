@@ -109,10 +109,12 @@ This command reads `output/video/<name>/lines.csv`. It writes `spacing.csv` (`ti
 `NAME` is the measurement name (`input/folder/NAME`) or any folder of photos. Videos in the folder are ignored.
 
 1. The photos are sorted by capture time. The time comes from the equipment capture or photo log when the photo is listed there (`log`), else from EXIF (`exif`), else from the file (`file`).
-2. The first photo tunes the detection settings. The marked photo opens; answer `y` to keep the settings, `n` to see the next suggestion, or type settings such as `k=4 rel=0.2`.
-3. The middle 300 rows of every photo are cut out and analysed, all 300 of them, with the confirmed settings. The tuning in step 2 also runs on this strip.
+2. The middle 300 rows of every photo are cut out.
+3. The lines are found from the contrast of the strip, as below. There is no tuning and nothing to confirm.
 
-`--yes` uses the first suggestion without asking. Detection options on the command line (`--k 4` ...) skip the tuning. `--no-show` keeps the image viewer closed, and `--window N` sets how many neighbours each photo is compared with for the warnings.
+**Contrast detection.** Every pixel gets a contrast `(I - background) / background`, with `I` the mean of R, G and B and the background a moving median along x. Averaging over y gives one contrast value per x. Where `|contrast|` exceeds `--contrast-threshold` (default 0.025) there is a feature. A bright peak followed by a dark dip is a line at the zero crossing between them; anything else is one-sided and placed at its largest extremum. Dust and defects do not move: one-sided features at the same x in 3 of 6 evenly spread photos, and visible there in all 6, are not counted as lines, and their positions are in `parameters.json` under `defects_x`. If such features are more than half of all features, the lines themselves are not moving and nothing is removed.
+
+**Peak detection.** `--peak-detection` uses the previous, tuned method on the strips: the first photo tunes the settings, the marked photo opens, and you answer `y` to keep them, `n` to see the next suggestion, or type settings such as `k=4 rel=0.2`. `--track`, `--full-image` and the detection options on the command line (`--k 4` ...) also use it. `--yes` uses the first suggestion without asking. Detection options skip the tuning. `--no-show` keeps the image viewer closed, and `--window N` sets how many neighbours each photo is compared with for the warnings.
 
 ```text
 output/folder/<name>/

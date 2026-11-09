@@ -103,6 +103,10 @@ def build_parser():
     fol.add_argument("--full-image", action="store_true",
                      help="analyse the whole photos instead of their middle 300 px; "
                           "writes to <output-dir>/folder/NAME/full_image/")
+    fol.add_argument("--peak-detection", action="store_true",
+                     help="use the tuned peak detection on the strips instead of the contrast method")
+    fol.add_argument("--contrast-threshold", type=float, default=None,
+                     help="|contrast| that starts a line in the contrast method (default 0.025)")
     trk = fol.add_argument_group("line tracking")
     trk.add_argument("--track", action="store_true",
                      help="search every photo only around the lines of the previous one "
@@ -176,6 +180,7 @@ def run(args):
         out = analyse_spacing(args.name, args.output_dir)
         print(f"{out['frames']} frames -> {out['plot_path']}, {out['csv_path']}")
     elif args.command == "folder":
+        from .contrast import ContrastConfig
         from .folder import main_folder
         tracking = None
         if args.track or args.x_tolerance is not None or args.contrast_steps:
@@ -190,7 +195,10 @@ def run(args):
         main_folder(args.path, args.output_dir, args.input_dir, window=args.window,
                     interactive=not args.yes, show=not args.no_show,
                     config=config_from_args(args), tracking=tracking,
-                    middle_strips=not args.full_image)
+                    middle_strips=not args.full_image,
+                    method="peaks" if args.peak_detection else "contrast",
+                    contrast=None if args.contrast_threshold is None
+                    else ContrastConfig(threshold=args.contrast_threshold))
     elif args.command == "report":
         from .report import main_report
         out = main_report(args.name, args.ramp, args.results, args.output_dir,
