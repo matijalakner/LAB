@@ -1,65 +1,70 @@
 """Line detection in a thin strip of every photo (``analysis jumps NAME``).
 
+How the lines look in the real photos (series 08, see lines.py and
+tests/data/real): a sharp brightness change through every row, a step DOWN
+left of the brightest part of the photo, a step UP right of it, and a thin
+dark or bright line near the brightest part. The distances between them are
+uneven (narrow bands next to wide ones).
+
 Preparation (first photo, and again whenever you ask for it):
-  1. Cut out the middle ``prep_rows`` (300) rows and cut ``edge`` (200) px off
-     the left and the right.
+  1. Cut out the middle ``prep_rows`` (300) rows and cut ``edge`` (200 px of a
+     6000 px wide photo) off the left and the right.
   2. Brightness per pixel: the colour channels weighted by how bright they are
-     in this strip; a channel that is nearly black adds only noise and one that
-     is saturated has no contrast, so they get (almost) no weight (channel_weights).
-  3. Contrast of every pixel, (I - background) / background with the background
-     a moving median along x, collapsed (averaged) over the rows -> one value per x.
-  4. Jump: c(x + w/2) - c(x - w/2) over ``jump_width`` w px (16 for a 6000 px wide
-     photo, scaled with the width; 1 = neighbouring pixels).
-  5. Every positive jump larger than ``contrast_diff`` noise sigmas is a line
-     (sigma = robust spread of the jumps of this strip). Within ``merge`` px only
-     the largest counts. Then the gap rule (below).
-  6. The whole photo is saved with the lines as navy blue lines from top to
+     (channel_weights).
+  3. Line strength (lines.line_strength): the step, and the thin-line value, of
+     log(brightness) over ``jump_width`` px, both signs, as the median of 6
+     bands of rows (dust in some rows does not count), in local noise sigmas
+     (with a floor of about a third of a brightness level, for flat dark areas).
+  4. Every peak over ``contrast_diff`` sigmas is a line; a step that happens
+     within one pixel (a JPEG block edge) must be far stronger (lines.sharpness).
+     Then the gap rule (below).
+  5. The whole photo is saved with the lines as navy blue lines from top to
      bottom and opened; you answer y (keep), n (then + = more lines, - = fewer
      lines, or a new value) or q. After 15 tries it stops by itself.
-  7. Template: the collapsed contrast around the kept lines, averaged over all
-     of them: what a line looks like in this series.
+  6. Every kept line keeps its own shape: a template from this strip.
 
 Analysis (every photo, in time order, the first included), detector "template":
   The middle row and the rows above and below it (``rows`` = 3), without the
-  edges, are collapsed the same way, and the template is slid along it
-  (matched filter): lines are where it fits best. This uses the whole shape
-  of a line (dip and rise), not one difference, so faint lines stand out
-  better from the noise.
-  1. Period: the autocorrelation of the filtered profile near the spacing of
-     the photo before.
-  2. Prediction: the lines of the photo before, stretched by (period / spacing
-     before) and shifted, as a whole, to where the filtered profile is highest.
-  3. Every predicted line is refined within +-``window`` (15 %) of the period;
-     it is found if the filter there is over ``min_sigma`` noise sigmas and over
-     ``min_rel`` of the typical line. Beyond the outer lines the grid is
-     extended; a line there needs ``contrast_diff`` sigmas.
-  4. Gap rule and grid fit -> spacing and its error (spacing_err_px).
-  5. Quality: the photo is doubtful when the lines are weak (median filter
-     value under ``q_snr`` sigmas), fewer than ``q_coverage`` of the predicted
-     lines are found, the lines are far off a regular grid (rms over
-     ``q_residual`` of the spacing), the period and the spacing disagree by over
-     ``q_period``, or the spacing jumped by over ``q_jump`` from the photo before.
-  Detector "threshold" is the previous one: each line searched within +-20 %
-  of the spacing for its largest jump.
+  edges. The whole row of lines of the photo before is shifted and stretched
+  (+-``stretch``) to where the lines fit best, then every line is refined
+  within +-``window`` (10 %) of the spacing; it is found if the normalized
+  correlation with its own template is over ``ncc_min``. A line not found is
+  followed at its predicted position; templates slowly follow the lines; new
+  lines beyond the outer ones are found as in the preparation.
+  Detector "threshold" is the earlier one (largest jump near each line).
+
+Quality: a photo is doubtful when the median match of its lines is under
+``q_snr``, fewer than ``q_coverage`` of the lines in the picture are found, the
+spacing changed by more than ``q_jump`` from the photo before, a distance is
+over ``q_gap`` (1.7) x the average (a missed line would make it ~2x; in the
+real photos the widest band was 1.4x), or the lines
+differ (by more than ``check_tol`` px) from those found as in the preparation
+on the middle ``check_rows`` (300) rows of the same photo: a strong line there
+(1.5 x contrast_diff) that is not followed, or a followed line with no line
+there even at half the limit. The check only
+decides whether the photo is doubtful; the spacing is always that of the
+3-row strip.
 
 Asking (``ask``):
   doubtful (default)  a doubtful photo is shown: y = keep it, n = prepare again
                       on it and measure it again, q = stop (results written)
-  count               as before: when the number of lines changes
+  count               when the number of lines changes
   review              nothing during the run; afterwards an overview of the
                       spacing (overview.png) and every doubtful photo is shown:
                       y = keep, x = exclude (warning, left out of the report),
                       p = prepare again on it and measure it again, q = stop
-  --yes asks nothing (the first preparation is kept).
+  --yes asks nothing: the first preparation is kept, and a doubtful photo is
+  prepared again automatically and measured again.
 
 Gap rule (every photo and the preparation): a distance between neighbouring
-lines below half the average distance means a false line (the average of the
-normal distances, average_gap: a big hole or a false line does not pull it): of its two lines the
-one whose removal leaves the distances closest to the typical (median) one is
-excluded, until no such distance is left. A distance over twice the average
-(lines lost) is left out: the lines are split there. The spacing is then the
-grid fit (spacing.fit_grid) of every part, together: (sum of their lengths) /
-(sum of their grid steps). Excluded lines are not followed in the next photo.
+lines below half the average distance (the average of the normal distances,
+average_gap) means a possible false line: the weaker line of the pair is
+excluded, but only if it is weaker than 0.4 x the median line (real narrow
+bands, two strong lines, stay). A distance over twice the average (lines lost)
+is left out. The spacing is the mean of the remaining distances (the lines are
+not assumed evenly spaced). std_spacing_px is the spread of the distances (how
+uneven the bands are); spacing_err_px is how precisely the spacing is measured,
+from how far the 3-row lines lie from the same lines of the 300-row check.
 
 x positions are those of the whole photo (the cut edge added back).
 """
@@ -87,29 +92,33 @@ PERIOD_TOL = 0.05
 
 @dataclass
 class JumpConfig:
-    contrast_diff: float = None   # preparation and new edge lines: limit in noise sigmas; None = 6
-    edge: int = 200               # px cut off the left and the right
+    contrast_diff: float = None   # preparation: line strength limit in noise sigmas; None = 6
+    edge: int = 200               # px cut off the left and the right (of a 6000 px wide photo)
     prep_rows: int = 300          # rows of the preparation strip
     rows: int = 3                 # rows of the analysis strip (middle row +- 1)
-    merge: int = 25               # jumps closer than this (px) are one line
-    jump_width: int = 16          # jump = c(x + w/2) - c(x - w/2); 1 = neighbouring pixels
+    merge: int = 47               # lines closer than this (px) are one line
+    jump_width: int = 18          # step over this many px (template: 2 x smoothing)
+    template_half: int = 70       # half width of a line's template (px)
     channels: str = "auto"        # auto (weighted by brightness), mean, r, g or b
-    detector: str = "template"    # template (matched filter + prediction) or threshold
+    detector: str = "template"    # template (every line its own shape) or threshold
     track: bool = True            # threshold detector: search near the previous lines
-    window: float = None          # search +- this fraction of the spacing; None = 0.15
+    window: float = None          # search +- this fraction of the spacing; None = 0.1
                                   # (template) / 0.2 (threshold)
-    min_sigma: float = 2.0        # a tracked line: over this many noise sigmas ...
+    ncc_min: float = 0.3          # template: a line is found if its match is over this
+    stretch: float = 0.06         # template: the row of lines may stretch +- this per photo
+    min_sigma: float = 2.0        # threshold detector: a tracked line over this many sigmas
     min_rel: float = 0.35         # ... and over this fraction of the typical line
     ask: str = "doubtful"         # doubtful | count | review
-    q_snr: float = 3.0            # quality limits, see the module doc
-    q_coverage: float = 0.6
-    q_residual: float = 0.15
-    q_period: float = 0.05
-    q_jump: float = 0.08
-    stretch: float = 0.04         # the row of lines may stretch +- this much per photo
-    stretch_from_period: bool = False
-    # merge and jump_width are px of a photo REF_WIDTH (6000 px) wide and scale with the
-    # width (jump_width 1 stays 1)
+    q_snr: float = 0.5            # doubtful: median match of the lines under this
+    q_coverage: float = 0.75      # ... fewer than this share of the lines found
+    q_jump: float = 0.08          # ... the spacing changed by more than this
+    q_gap: float = 1.7            # ... a distance is over this x the average (a line may be
+                                  # missing; over GAP_HIGH it is left out of the spacing)
+    check_rows: int = 300         # ... the lines differ from those found as in the preparation
+                                  # on this many middle rows (0 = no check)
+    check_tol: int = 35           # px a line may differ from the check
+    # every px value is for a photo REF_WIDTH (6000 px) wide and scales with the width
+    # (jump_width 1 stays 1)
 
 
 # ---------------------------------------------------------------------------
@@ -260,15 +269,25 @@ def average_gap(gaps, low=GAP_LOW, high=GAP_HIGH):
     return avg
 
 
-def gap_rule(xs, low=GAP_LOW, high=GAP_HIGH):
-    """(kept lines, excluded lines, parts): the gap rule, see the module doc."""
-    xs = sorted(float(x) for x in xs)
+WEAK = 0.4      # a too-close line is excluded only if weaker than this x the median line
+
+
+def gap_rule(xs, low=GAP_LOW, high=GAP_HIGH, strengths=None, weak=WEAK):
+    """(kept lines, excluded lines, parts): the gap rule, see the module doc.
+
+    With ``strengths`` (one per line), of a pair closer than low x the average
+    the weaker line is excluded only if it is weaker than ``weak`` x the median
+    strength: real narrow bands (two strong lines) stay. Without, as before.
+    """
+    order = np.argsort(np.asarray(xs, float)) if len(xs) else []
+    xs = [float(xs[i]) for i in order]
+    st = None if strengths is None else [float(strengths[i]) for i in order]
     excluded = []
     while len(xs) >= 3:
         gaps = np.diff(xs)
         avg = average_gap(gaps, low, high)
-        i = int(np.argmin(gaps))
-        if gaps[i] >= low * avg:
+        short = [i for i in range(len(gaps)) if gaps[i] < low * avg]
+        if not short:
             break
         typical = float(np.median(gaps))   # not pulled by the short distance itself
 
@@ -277,8 +296,21 @@ def gap_rule(xs, low=GAP_LOW, high=GAP_HIGH):
                 return abs(xs[j + 1] - xs[j - 1] - typical)
             other = xs[2] - xs[1] if j == 0 else xs[-2] - xs[-3]
             return abs(other - typical)
-        j = i if score(i) <= score(i + 1) else i + 1
-        excluded.append(xs.pop(j))
+        drop = None
+        if st is None:
+            i = min(short, key=lambda i: gaps[i])
+            drop = i if score(i) <= score(i + 1) else i + 1
+        else:
+            med = float(np.median(st))
+            for i in short:
+                j = i if st[i] <= st[i + 1] else i + 1
+                if st[j] < weak * med and (drop is None or st[j] < st[drop]):
+                    drop = j
+            if drop is None:
+                break
+        excluded.append(xs.pop(drop))
+        if st is not None:
+            st.pop(drop)
     parts = [xs[:1]] if xs else []
     if len(xs) >= 2:
         avg = average_gap(np.diff(xs), low, high)
@@ -290,50 +322,26 @@ def gap_rule(xs, low=GAP_LOW, high=GAP_HIGH):
     return xs, sorted(excluded), parts
 
 
-def spacing_with_rule(xs, low=GAP_LOW, high=GAP_HIGH, hint=None):
-    """Spacing (grid fit of the parts between long gaps) -> Spacing.
+def spacing_with_rule(xs, low=GAP_LOW, high=GAP_HIGH, hint=None, strengths=None):
+    """Spacing after the gap rule -> Spacing.
 
-    ``hint``: expected spacing (the period), the start of every grid fit.
+    The spacing is the mean of the distances between neighbouring lines, the
+    distances over high x the average (lines lost there) left out. The lines
+    are not assumed evenly spaced: in real photos the bands differ a lot.
+    err is the standard error of that mean. ``hint`` is not used any more.
     """
-    kept, excluded, parts = gap_rule(xs, low, high)
+    kept, excluded, parts = gap_rule(xs, low, high, strengths)
     res = Spacing(kept, excluded, [(p[-1], q[0]) for p, q in zip(parts, parts[1:])])
-    span = steps = 0.0
-    single, extra, missing = [], 0, 0
-    fits = []
-    for part in parts:
-        fit = fit_grid(part, hint=hint)
-        if fit is None or len(fit.lines) < 2:
-            continue
-        n = fit.index[-1] - fit.index[0]
-        if n <= 0:
-            continue
-        fits.append(fit)
-        span += fit.lines[-1] - fit.lines[0]
-        steps += n
-        idx = np.asarray(fit.index)
-        single += list(np.diff(fit.lines)[np.diff(idx) == 1])
-        extra += len(fit.extra)
-        missing += len(fit.missing)
-    if steps:
-        res.spacing = span / steps
-        res.std = float(np.std(single, ddof=1)) if len(single) > 1 else float("nan")
-        missing += sum(max(0, int(round((b - a) / res.spacing)) - 1) for a, b in res.long_gaps)
-        # uncertainty of the slope of x = x0 + i * spacing (pooled over the parts)
-        resid, sxx, n_pts = [], 0.0, 0
-        for fit in fits:
-            i = np.asarray(fit.index, float)
-            x = np.asarray(fit.lines)
-            A = np.column_stack([np.ones_like(i), i])
-            coef, *_ = np.linalg.lstsq(A, x, rcond=None)
-            resid += list(x - A @ coef)
-            sxx += float(((i - i.mean()) ** 2).sum())
-            n_pts += len(x)
-        dof = n_pts - 2 * len(fits)
-        if dof > 0 and sxx > 0:
-            s_r = float(np.sqrt(np.sum(np.square(resid)) / dof))
-            res.err = s_r / np.sqrt(sxx)
-            res.residual = s_r
-    res.n_missing, res.n_extra = missing, len(excluded) + extra
+    gaps = np.concatenate([np.diff(p) for p in parts if len(p) >= 2]) if parts else []
+    if len(gaps):
+        res.spacing = float(np.mean(gaps))
+        if len(gaps) > 1:
+            res.std = float(np.std(gaps, ddof=1))
+            res.err = res.std / np.sqrt(len(gaps))
+            res.residual = res.std
+        res.n_missing = sum(max(0, int(round((b - a) / res.spacing)) - 1)
+                            for a, b in res.long_gaps)
+    res.n_extra = len(excluded)
     return res
 
 
@@ -386,45 +394,20 @@ def track_jumps(profile, reference, cfg, new_limit):
 # ---------------------------------------------------------------------------
 # template detector
 # ---------------------------------------------------------------------------
-def make_template(profile, lines, spacing, half_frac=0.3):
-    """Mean of the profile around the lines (strip x) -> (template, half width).
-
-    The template is zero-mean with unit length, so the filtered profile is in
-    the units of the profile; index ``half`` is the line position.
-    """
-    half = max(3, int(round(half_frac * spacing)))
-    k = np.arange(-half, half + 1)
-    xs = np.arange(len(profile))
-    segs = [np.interp(x + k, xs, profile) for x in lines if half <= x < len(profile) - half]
-    if not segs:
-        return None, half
-    t = np.mean(segs, axis=0)
-    t = t - t.mean()
-    norm = np.linalg.norm(t)
-    return (t / norm if norm > 0 else None), half
-
-
-def matched(profile, template):
-    """Filtered profile: m[x] = sum_k template[k] * profile[x - half + k]."""
-    half = len(template) // 2
-    c = np.pad(np.asarray(profile, float), half, mode="edge")
-    return np.correlate(c, template, mode="valid")
-
-
-def _value_at(m, x):
-    return np.interp(x, np.arange(len(m)), m)
-
-
 @dataclass
 class Measurement:
     lines: list                   # found lines (whole-photo x), before the gap rule
     spacing: Spacing
     reference: list               # positions to follow in the next photo
     period: float = None
-    snr: float = float("nan")     # median filter (or jump) value of the lines, in sigmas
-    coverage: float = float("nan")  # found / predicted lines
+    snr: float = float("nan")     # median match (correlation 0..1) of the lines found
+    coverage: float = float("nan")  # found / predicted lines in the picture
     jump: float = float("nan")    # spacing change from the photo before
     doubts: list = field(default_factory=list)
+    templates: list = None        # line shapes to follow in the next photo
+    strengths: list = None        # per found line (correlation)
+    check: list = None            # lines found as in the preparation (check_rows rows)
+    lost: list = field(default_factory=list)   # lines followed but not found (predicted x)
 
     @property
     def doubtful(self):
@@ -432,54 +415,78 @@ class Measurement:
 
 
 class Analyser:
-    """The detection of one series: settings, channel weights, template, reference."""
+    """The detection of one series: settings, channel weights, lines and their shapes."""
 
     def __init__(self, cfg):
         self.cfg = cfg
         self.weights = None
         self.value = cfg.contrast_diff or START_SIGMAS
-        self.template = None
-        self.half = None
         self.reference = []        # whole-photo x
+        self.templates = []        # one per reference line (template detector)
         self.spacing = None        # spacing of the photo before
+        self._width = None
 
     # sizes ------------------------------------------------------------------
+    def edge_px(self, img):
+        """``cfg.edge`` (px of a 6000 px wide photo) for this photo's width."""
+        return int(round(self.cfg.edge * img.shape[1] / REF_WIDTH))
+
     def sizes(self, img):
-        """(jump_width, merge) in px for this photo's width."""
+        """(jump_width, merge) in px for this photo's width (threshold detector)."""
         s = img.shape[1] / REF_WIDTH
         jw = 1 if self.cfg.jump_width <= 1 else max(2, int(round(self.cfg.jump_width * s)))
         return jw, max(3, int(round(self.cfg.merge * s)))
 
+    def line_sizes(self, img):
+        from .lines import LineSizes
+        return LineSizes.for_width(img.shape[1], jump_width=max(self.cfg.jump_width, 2),
+                                   merge=self.cfg.merge, half=self.cfg.template_half)
+
     def _cfg(self, img):
         jw, merge = self.sizes(img)
-        return replace(self.cfg, jump_width=jw, merge=merge)
+        return replace(self.cfg, jump_width=jw, merge=merge, edge=self.edge_px(img))
+
+    def strip(self, img, rows):
+        return middle_strip(img, rows, self.edge_px(img))
+
+    def gray(self, img, rows):
+        """Brightness (channels weighted) of the middle ``rows`` rows, edges cut."""
+        return np.asarray(self.strip(img, rows), np.float32) @ np.asarray(self.weights,
+                                                                          np.float32)
 
     def strip_profile(self, img, rows):
-        return collapsed_contrast(middle_strip(img, rows, self.cfg.edge), self.weights)
+        return collapsed_contrast(self.strip(img, rows), self.weights)
 
     # preparation ------------------------------------------------------------
     def set_weights(self, img):
-        self.weights = channel_weights(middle_strip(img, self.cfg.prep_rows, self.cfg.edge),
-                                       self.cfg.channels)
+        self.weights = channel_weights(self.strip(img, self.cfg.prep_rows), self.cfg.channels)
 
     def prep_lines(self, img, value):
-        """(lines in whole-photo x, sigma) of the preparation strip at ``value`` sigmas."""
-        cfg = self._cfg(img)
-        profile = self.strip_profile(img, cfg.prep_rows)
-        sigma = noise_sigma(jump_profile(profile, cfg.jump_width)[0])
-        xs = find_jumps(profile, value * sigma, cfg.merge, cfg.jump_width)
-        return [x + cfg.edge for x in xs], sigma
+        """(lines in whole-photo x, strengths) of the preparation strip at ``value`` sigmas."""
+        edge = self.edge_px(img)
+        if self.cfg.detector == "threshold":
+            cfg = self._cfg(img)
+            profile = self.strip_profile(img, cfg.prep_rows)
+            sigma = noise_sigma(jump_profile(profile, cfg.jump_width)[0])
+            xs = find_jumps(profile, value * sigma, cfg.merge, cfg.jump_width)
+            return [x + edge for x in xs], None
+        from .lines import detect
+        xs, st = detect(self.gray(img, self.cfg.prep_rows), value, self.line_sizes(img))
+        return [x + edge for x in xs], st
 
     def set_reference(self, img, lines):
         """Start following ``lines`` (accepted in the preparation of ``img``)."""
         self.reference = sorted(lines)
-        sp = spacing_with_rule(lines)
+        # the lines were kept in the preparation: their spacing without excluding any
+        sp = spacing_with_rule(lines, strengths=[1.0] * len(lines))
         self.spacing = sp.spacing
-        self.template = None
-        if self.cfg.detector == "template" and sp.spacing:
-            profile = self.strip_profile(img, self.cfg.prep_rows)
-            self.template, self.half = make_template(
-                profile, [x - self.cfg.edge for x in sp.lines], sp.spacing)
+        self.templates = []
+        if self.cfg.detector == "template":
+            from .lines import log_profile, make_templates
+            edge = self.edge_px(img)
+            L = log_profile(self.gray(img, self.cfg.prep_rows))
+            self.templates = make_templates(L, [x - edge for x in self.reference],
+                                            self.line_sizes(img).half)
 
     # analysis ----------------------------------------------------------------
     def lines(self, img, reference):
@@ -496,116 +503,120 @@ class Analyser:
         p = period(profile, _spacing_of(found) or _spacing_of(ref))
         return [x + cfg.edge for x in found], [x + cfg.edge for x in nxt], p
 
-    def _template_lines(self, img):
-        """(found, next reference, period, snr, coverage), strip x, template detector."""
-        cfg = self._cfg(img)
-        profile = self.strip_profile(img, cfg.rows)
-        m = matched(profile, self.template)
-        sigma = noise_sigma(m)
-        ref = np.array([x - cfg.edge for x in self.reference], float)
-        prev = self.spacing or _spacing_of(ref)
-        if len(ref) < 2 or not prev:
-            found = [k for k in _peaks(m, self.value * sigma, cfg.merge)]
-            return found, [], period(m, _spacing_of(found)), np.nan, np.nan, None
-        # 1. period, 2. stretch + shift of the whole row of lines
-        per = period(m, prev, 0.75, 1.33)
-        # the stretch is searched around the spacing before and, when the period
-        # of the pattern says the spacing moved further, around the period too;
-        # the better fit wins (the period of a noisy strip must not lead alone)
-        centres = [1.0]
-        if per and abs(per / prev - 1) > self.cfg.stretch and abs(per / prev - 1) < 0.25:
-            centres.append(per / prev)
-        if self.cfg.stretch_from_period and per and abs(per / prev - 1) < 0.25:
-            centres = [per / prev]
-        centre = float(np.median(ref))
-        best = (-np.inf, 1.0, 0.0)
-        for a0 in centres:
-            p_now = a0 * prev
-            shifts = np.arange(-0.5 * p_now, 0.5 * p_now + 1, 1.0)
-            for a in a0 * np.linspace(1 - self.cfg.stretch, 1 + self.cfg.stretch, 17):
-                pred = centre + a * (ref - centre)
-                inside = (pred > 0) & (pred < len(m) - 1)
-                if inside.sum() < 2:
-                    continue
-                vals = np.array([_value_at(m, pred[inside] + b).mean() for b in shifts])
-                j = int(np.argmax(vals))
-                if vals[j] > best[0]:
-                    best = (vals[j], a, float(shifts[j]))
-        _, a, b = best
-        pred = centre + a * (ref - centre) + b
-        spacing_now = a * prev
-        # extend the grid beyond the outer lines
-        ext = []
-        x = pred.min() - spacing_now
-        while x > 0:
-            ext.append(x)
-            x -= spacing_now
-        x = pred.max() + spacing_now
-        while x < len(m) - 1:
-            ext.append(x)
-            x += spacing_now
-        # 3. refine every predicted line in its window
-        half = (cfg.window or 0.15) * spacing_now
-
-        def window_max(x):
-            lo, hi = int(np.floor(x - half)), int(np.ceil(x + half))
-            lo, hi = max(lo, 0), min(hi, len(m) - 1)
-            if hi < lo:
-                return None
-            k = lo + int(np.argmax(m[lo:hi + 1]))
-            return k + _refine(m, k), m[k]
-
-        cand = [(x, window_max(x)) for x in pred]
-        peaks = [v for _, w in cand if w for v in [w[1]]]
-        need = max(cfg.min_sigma * sigma, cfg.min_rel * float(np.median(peaks)) if peaks else 0)
-        found, nxt, vals = [], [], []
+    def _template_measure(self, img):
+        """Measurement with the per-line templates (lines.track)."""
+        from .lines import detect, log_profile, make_templates, refresh, track
+        cfg, sz, edge = self.cfg, self.line_sizes(img), self.edge_px(img)
+        g = self.gray(img, cfg.rows)
+        L = log_profile(g)
+        ref = [x - edge for x in self.reference]
+        found, score, pred = track(L, ref, self.templates, self.spacing,
+                                   cfg.window or 0.1, cfg.ncc_min, cfg.stretch)
+        lines, strengths, nxt, temps = [], [], [], []
         inside = 0
-        for x, w in cand:
-            if not 0 <= x <= len(m) - 1:
-                nxt.append(x)                    # out of the picture: keep following it
-                continue
-            inside += 1
-            if w and w[1] > need:
-                found.append(w[0])
-                vals.append(w[1])
-                nxt.append(w[0])
-            else:
-                nxt.append(x)                    # predicted position
-        new_need = max(need, self.value * sigma)
-        for x in ext:
-            w = window_max(x)
-            if w and w[1] > new_need and all(abs(w[0] - f) > 0.5 * spacing_now for f in found):
-                found.append(w[0])
-                vals.append(w[1])
-                nxt.append(w[0])
-        snr = float(np.median(vals) / sigma) if vals else 0.0
-        coverage = len(vals) / max(inside, 1) if inside else 0.0
-        outside = [x for x in pred if not 0 <= x <= len(m) - 1]
-        return sorted(found), outside, per, snr, min(coverage, 1.0), spacing_now
+        for x, sc, pr, t in zip(found, score, pred, self.templates):
+            in_picture = sz.margin <= pr <= len(L) - 1 - sz.margin
+            inside += in_picture
+            if x is not None:
+                lines.append(x)
+                strengths.append(sc)
+            if x is not None or in_picture:
+                nxt.append(x if x is not None else pr)      # lost: follow the prediction
+                temps.append(t)
+        temps = refresh(temps, L, [x if x in lines else None for x in nxt],
+                        [strengths[lines.index(x)] if x in lines else np.nan for x in nxt],
+                        sz.half)
+        # new lines coming into the picture beyond the outer ones
+        if lines and self.spacing:
+            new, new_st = detect(g, self.value, sz)
+            lo, hi = min(nxt) - 0.6 * self.spacing, max(nxt) + 0.6 * self.spacing
+            for x, s in zip(new, new_st):
+                if x < lo or x > hi:
+                    lines.append(x)
+                    strengths.append(1.0)
+                    nxt.append(x)
+                    temps.append(make_templates(L, [x], sz.half)[0])
+        order = np.argsort(nxt)
+        nxt = [nxt[i] for i in order]
+        temps = [temps[i] for i in order]
+        sp = spacing_with_rule(lines, strengths=strengths)
+        drop = set(sp.excluded)
+        keep = [i for i, x in enumerate(nxt) if x not in drop]
+        # a line lost between two found ones is still a step of the spacing: its
+        # predicted position goes into the spacing (as a missed line), so the
+        # distance across it is not taken as one wide band
+        lost = [x for x in nxt if x not in lines and min(lines or [x]) < x < max(lines or [x])]
+        full = spacing_with_rule([x + edge for x in lines + lost],
+                                 strengths=strengths + [float(np.median(strengths))] * len(lost)
+                                 if strengths else None)
+        full.lines = [x for x in full.lines if x - edge not in lost]
+        full.n_missing += len(lost)
+        lost_whole = [x + edge for x in lost]
+        res = Measurement([x + edge for x in lines], full,
+            [nxt[i] + edge for i in keep], None,
+            float(np.median(strengths)) if strengths else 0.0,
+            min(len(lines) / inside, 1.0) if inside else 0.0,
+            templates=[temps[i] for i in keep], strengths=strengths, lost=lost_whole)
+        res.period = period(L - np.convolve(L, np.ones(sz.win) / sz.win, "same"),
+                            sp.spacing)
+        if cfg.check_rows:
+            res.check = self.check_lines(img)
+        self._position_error(res, img)
+        return res
+
+    def _position_error(self, res, img):
+        """spacing_err_px from how precisely the lines are placed.
+
+        The spread of the band widths is in std_spacing_px; it says how uneven
+        the bands are, not how well the spacing is measured. The error of the
+        mean spacing is that of (last - first line) / steps: sqrt(2) x the
+        position error / steps. The position error is the rms difference
+        between the 3-row lines and the same lines of the check (at least 0.5 px);
+        without a check, 1 px of a 2576 px wide photo, scaled.
+        """
+        sp = res.spacing
+        if not sp.spacing or len(sp.lines) < 2:
+            return
+        sigma = 1.0 * img.shape[1] / 2576
+        if res.check:
+            tol = self.cfg.check_tol * img.shape[1] / REF_WIDTH
+            d = [min(abs(x - c) for c, _ in res.check) for x in sp.lines]
+            d = [v for v in d if v <= tol]
+            if len(d) >= 2:
+                sigma = max(float(np.sqrt(np.mean(np.square(d)))), 0.5)
+        steps = (sp.lines[-1] - sp.lines[0]) / sp.spacing
+        sp.err = float(np.sqrt(2) * sigma / max(steps, 1))
+
+    def check_lines(self, img):
+        """Lines of the middle ``check_rows`` rows, found as in the preparation.
+
+        -> (x, strength) pairs (whole-photo x) down to half the preparation
+        limit; doubts() uses the strong ones (1.5 x the limit) to see whether a
+        line is not followed, and all of them to see whether a followed line is
+        not there at all (a faint line is found in one strip and not in another).
+        """
+        from .lines import detect
+        rows = min(self.cfg.check_rows, img.shape[0])
+        xs, st = detect(self.gray(img, rows), 0.5 * self.value, self.line_sizes(img))
+        edge = self.edge_px(img)
+        kept = set(gap_rule(xs, strengths=st)[0])
+        return [(x + edge, v) for x, v in zip(xs, st) if x in kept]
 
     def measure(self, img):
-        """Measure one photo -> Measurement (also moves the reference on)."""
+        """Measure one photo -> Measurement (accept() moves the reference on)."""
         cfg = self.cfg
-        snr = coverage = np.nan
-        if cfg.detector == "template" and self.template is not None:
-            found, outside, per, snr, coverage, expected = self._template_lines(img)
-            found = [x + cfg.edge for x in found]
-            outside = [x + cfg.edge for x in outside]
-            # the period is the best guess of the grid; the lines are then counted on it
-            hint = per if per and expected and abs(per / expected - 1) < 0.2 else expected
-            sp = spacing_with_rule(found, hint=hint)
-            fit = fit_grid(sp.lines, hint=hint)
-            # next reference: the lines on the grid and the grid positions of the
-            # missed ones (a stray detection does not lead the next photo astray)
-            nxt = sorted((fit.lines + fit.missing if fit else sp.lines) + outside)
+        self._width = img.shape[1]
+        if cfg.detector == "template" and self.templates:
+            res = self._template_measure(img)
         else:
             found, nxt, per = self.lines(img, self.reference)
-            if self.reference:
-                coverage = min(len(found) / max(len(self.reference), 1), 1.0)
+            coverage = (min(len(found) / max(len(self.reference), 1), 1.0)
+                        if self.reference else np.nan)
             sp = spacing_with_rule(found)
             drop = set(sp.excluded)
-            nxt = [x for x in nxt if x not in drop]
-        res = Measurement(found, sp, nxt, per, snr, coverage)
+            res = Measurement(found, sp, [x for x in nxt if x not in drop], per, np.nan,
+                              coverage)
+        sp = res.spacing
         if sp.spacing and self.spacing:
             res.jump = sp.spacing / self.spacing - 1
         res.doubts = self.doubts(res)
@@ -617,51 +628,73 @@ class Analyser:
         if sp.spacing is None:
             return ["fewer than 2 lines"]
         if not np.isnan(res.snr) and res.snr < cfg.q_snr:
-            out.append(f"weak lines ({res.snr:.1f} sigma)")
+            out.append(f"weak lines (match {res.snr:.2f})")
         if not np.isnan(res.coverage) and res.coverage < cfg.q_coverage:
             out.append(f"only {res.coverage:.0%} of the lines found")
-        if not np.isnan(sp.residual) and sp.residual > cfg.q_residual * sp.spacing:
-            out.append(f"irregular ({sp.residual / sp.spacing:.0%} of the spacing off the grid)")
-        if res.period and abs(res.period / sp.spacing - 1) > cfg.q_period:
-            out.append(f"period {res.period:.1f} px vs spacing {sp.spacing:.1f} px")
         if not np.isnan(res.jump) and abs(res.jump) > cfg.q_jump:
             out.append(f"spacing jumped {res.jump:+.0%}")
+        if len(sp.lines) >= 3:
+            gaps = np.diff(sp.lines)
+            avg = average_gap(gaps)
+            # a known lost line (followed, not found) is already counted as a step
+            wide = [(a, b) for a, b, g in zip(sp.lines, sp.lines[1:], gaps)
+                    if cfg.q_gap * avg < g <= GAP_HIGH * avg
+                    and not any(a < x < b for x in res.lost)]
+            if wide:
+                out.append("a line may be missing between x=" + ", ".join(
+                    f"{a:.0f}-{b:.0f}" for a, b in wide))
+        if res.check is not None:
+            tol = cfg.check_tol * self._width / REF_WIDTH if self._width else cfg.check_tol
+            strong = [x for x, v in res.check if v >= 1.5 * self.value]
+            anyline = [x for x, _ in res.check]
+            missed = [x for x in strong if all(abs(x - f) > tol for f in sp.lines)]
+            stray = [f for f in sp.lines if all(abs(x - f) > tol for x in anyline)]
+            if missed or stray:
+                out.append(f"lines differ from the {cfg.check_rows}-row check ("
+                           + ", ".join(t for t in (
+                               f"not followed at x={', '.join(f'{x:.0f}' for x in missed)}"
+                               if missed else "",
+                               f"no line at x={', '.join(f'{x:.0f}' for x in stray)}"
+                               if stray else "") if t) + ")")
         return out
 
     def accept(self, res):
-        """Take a measurement as the reference for the next photo.
-
-        The spacing carried on is that of the lines, unless the period of the
-        pattern disagrees with it by over q_period and is close to the spacing
-        before: then the period (a few wrong lines must not throw the search
-        of the next photo off).
-        """
+        """Take a measurement as the reference for the next photo."""
         self.reference = res.reference
-        sp, per = res.spacing.spacing, res.period
-        if sp and per and abs(per / sp - 1) > self.cfg.q_period and self.spacing \
-                and abs(per / self.spacing - 1) < 0.2:
-            self.spacing = per
-        elif sp:
-            self.spacing = sp
+        if res.templates is not None:
+            self.templates = res.templates
+        if res.spacing.spacing:
+            self.spacing = res.spacing.spacing
 
 
-def run_series(images, cfg=None):
+def run_series(images, cfg=None, reprepare=True, details=False):
     """Non-interactive analysis of photos (arrays) -> found lines per photo (whole-photo x).
 
-    The first photo is prepared at cfg.contrast_diff sigmas (default 6) and
-    every photo is measured and accepted as it is. Used by the test bench.
+    The first photo is prepared at cfg.contrast_diff sigmas (default 6). A
+    doubtful photo is prepared again (``reprepare``) and measured again, as
+    with --yes. With ``details`` the Measurements are returned instead.
     """
     cfg = cfg or JumpConfig()
     an = Analyser(cfg)
     an.set_weights(images[0])
-    lines, _ = an.prep_lines(images[0], an.value)
-    an.set_reference(images[0], spacing_with_rule(lines).lines)
+    _prepare_auto(an, images[0])
     out = []
     for img in images:
         res = an.measure(img)
+        if res.doubtful and reprepare:
+            _prepare_auto(an, img)
+            res = an.measure(img)
         an.accept(res)
-        out.append(res.lines)
+        out.append(res if details else res.lines)
     return out
+
+
+def _prepare_auto(an, img):
+    an.set_weights(img)
+    lines, st = an.prep_lines(img, an.value)
+    kept = gap_rule(lines, strengths=st)[0]
+    an.set_reference(img, kept)
+    return kept
 
 
 # ---------------------------------------------------------------------------
@@ -744,8 +777,8 @@ def prepare(photo, img, an, out_dir, interactive=True, show=True, ask=input):
     low = high = None
     prep_dir = Path(out_dir) / "preparation"
     for attempt in range(1, MAX_TRIES + 1):
-        found, sigma = an.prep_lines(img, value)
-        sp = spacing_with_rule(found)
+        found, strengths = an.prep_lines(img, value)
+        sp = spacing_with_rule(found, strengths=strengths)
         lines = sp.lines
         an.value = value
         if not interactive:
@@ -758,7 +791,7 @@ def prepare(photo, img, an, out_dir, interactive=True, show=True, ask=input):
         path = save_marked(img, lines, prep_dir / f"try{attempt}_{Path(photo).stem}.jpg",
                            sp.excluded)
         print(f"\nPreparation, try {attempt} of {MAX_TRIES} on {Path(photo).name}: "
-              f"contrast_diff {value:.3g} sigma (= {value * sigma:.4g}) -> {_describe(sp)}")
+              f"contrast_diff {value:.3g} sigma -> {_describe(sp)}")
         print("  channels R, G, B weighted " + ", ".join(f"{w:.2f}" for w in an.weights))
         print("  x = " + ", ".join(f"{x:.0f}" for x in lines))
         print(f"  (the {cfg.rows}-row analysis strip of this photo then gives {_describe(thin)})")
@@ -899,8 +932,7 @@ def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=T
     def note_preparation(photo, lines):
         preparations.append({"photo": photo.name, "contrast_diff_sigma": an.value,
                              "channel_weights": [round(float(w), 4) for w in an.weights],
-                             "template": None if an.template is None
-                             else [round(float(v), 5) for v in an.template],
+                             "line_templates": sum(t is not None for t in an.templates),
                              "initial_positions": [round(x, 2) for x in lines]})
 
     note_preparation(photos[0], initial)
@@ -934,6 +966,11 @@ def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=T
         try:
             img = img if n == 1 else _read_image(photo)
             res = an.measure(img)
+            if not interactive and res.doubtful:
+                why = "; ".join(res.doubts)
+                note_preparation(photo, _prepare_auto(an, img))
+                res = an.measure(img)
+                checked = f"prepared again automatically ({why})"
             while live and needs_question(res, previous):
                 sp = res.spacing
                 marked = save_marked(img, sp.lines, out_dir / f"{photo.stem}_marked.jpg",

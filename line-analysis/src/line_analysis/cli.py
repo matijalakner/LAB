@@ -135,21 +135,22 @@ def build_parser():
                      help="jump that makes a line in the preparation, in noise sigmas of "
                           "the photo (default 6); also used for new lines at the edges")
     jmp.add_argument("--edge-crop", type=int, default=200, metavar="PX",
-                     help="px cut off the left and the right (default 200)")
+                     help="px cut off the left and the right, of a 6000 px wide photo "
+                          "(scaled with the width; default 200)")
     jmp.add_argument("--prep-rows", type=int, default=300,
                      help="rows of the preparation strip (default 300)")
     jmp.add_argument("--rows", type=int, default=3,
                      help="rows of the analysis strip around the middle row (default 3)")
-    jmp.add_argument("--jump-width", type=int, default=16, metavar="PX",
-                     help="jump = c(x + w/2) - c(x - w/2) over this many px of a 6000 px wide "
-                          "photo, scaled with the width (default 16; 1 = neighbouring pixels)")
+    jmp.add_argument("--jump-width", type=int, default=18, metavar="PX",
+                     help="step length in px of a 6000 px wide photo, scaled with the width "
+                          "(default 18)")
     jmp.add_argument("--channels", choices=("auto", "mean", "r", "g", "b"), default="auto",
                      help="brightness from: auto = channels weighted by their brightness, "
                           "saturated ones left out (default); mean; or one channel")
     jmp.add_argument("--detector", choices=("template", "threshold"), default="template",
-                     help="template: the line shape from the preparation, slid along the "
-                          "strip, with the whole row of lines predicted (default); threshold: "
-                          "the largest jump near each line")
+                     help="template: every line its own shape from the preparation, found "
+                          "again near where it was (default); threshold: the largest jump "
+                          "near each line (earlier)")
     jmp.add_argument("--ask", choices=("doubtful", "count", "review"), default="doubtful",
                      help="doubtful: ask about photos with a bad quality score (default); "
                           "count: ask when the line count changes; review: ask nothing during "
@@ -159,12 +160,16 @@ def build_parser():
                           "of near the lines of the photo before")
     jmp.add_argument("--window", type=float, default=None,
                      help="search +- this fraction of the spacing around every line "
-                          "(default 0.15 template, 0.2 threshold)")
+                          "(default 0.1 template, 0.2 threshold)")
     jmp.add_argument("--min-sigma", type=float, default=2.0,
-                     help="tracking: a line's jump must be over this many noise sigmas "
-                          "(default 2)")
+                     help="threshold detector: a line's jump must be over this many noise "
+                          "sigmas (default 2)")
+    jmp.add_argument("--check-rows", type=int, default=300,
+                     help="a photo is doubtful when its lines differ from those found as in "
+                          "the preparation on this many middle rows (default 300; 0 = off)")
     jmp.add_argument("--yes", action="store_true",
-                     help="do not ask: keep the first contrast_diff and every line count")
+                     help="do not ask: keep the first preparation; a doubtful photo is "
+                          "prepared again automatically")
     jmp.add_argument("--no-show", action="store_true", help="do not open the image viewer")
     add_dirs(jmp)
 
@@ -267,7 +272,8 @@ def run(args):
                               prep_rows=args.prep_rows, rows=args.rows,
                               jump_width=args.jump_width, channels=args.channels,
                               track=not args.no_track, window=args.window,
-                              min_sigma=args.min_sigma, detector=args.detector, ask=args.ask),
+                              min_sigma=args.min_sigma, detector=args.detector, ask=args.ask,
+                              check_rows=args.check_rows),
                    interactive=not args.yes, show=not args.no_show)
     elif args.command == "report":
         from .report import main_report

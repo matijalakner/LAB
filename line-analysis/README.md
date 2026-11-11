@@ -161,35 +161,30 @@ The tracking also writes `tracking.csv`: `photo, file, status` (`reference`, `ok
 
 ### `analysis jumps NAME`
 
-A separate method from `analysis folder`; it writes to `output/jumps/NAME/`.
+A separate method from `analysis folder`; it writes to `output/jumps/NAME/`. Built and tested on real photos of series 08 (`tests/data/real`, lines marked by hand): every line there is found.
+
+**What a line looks like** in these photos: a sharp brightness change through every row, a step **down** left of the brightest part of the photo, a step **up** right of it, and a thin dark or bright line near the brightest part (where the step changes sign). The distances are uneven: narrow bands of 100–185 px sit next to 300–400 px ones (at 2576 px width).
 
 **Preparation** (on the first photo):
-1. The middle 300 rows are cut out (`--prep-rows`), and 200 px are cut off the left and the right (`--edge-crop`).
-2. Brightness: the colour channels weighted by how bright they are (`--channels auto`). Under red light green and blue are nearly black and would only add noise; a channel with more than 5 % saturated pixels shows no contrast and gets no weight. `mean`, `r`, `g`, `b` choose otherwise.
-3. The contrast of every pixel, `(I − background) / background` with the background a moving median along x, is averaged over the rows: one value per x.
-4. Jump: `c(x + w/2) − c(x − w/2)` over `--jump-width` w px (16 for a 6000 px wide photo, scaled with the width; 1 = neighbouring pixels).
-5. Every positive jump larger than `contrast_diff` **noise sigmas** of the photo is a line (start: `--contrast-diff`, default 6); within 25 px (scaled) only the largest counts. Then the gap rule (below).
-6. The whole photo opens with every line drawn in navy blue from top to bottom. Answer `y` to keep it, `n` and then `+` (more lines), `-` (fewer lines) or a number, or `q` to stop. After 15 tries it stops by itself. It also prints what the 3-row analysis strip of this photo then gives.
-7. **Template**: the contrast around the kept lines, averaged over all of them: what a line looks like in this series (`parameters.json`).
+1. The middle 300 rows are cut out (`--prep-rows`), and 200 px of a 6000 px photo (scaled with the width) are cut off the left and the right (`--edge-crop`).
+2. Brightness: the colour channels weighted by how bright they are (`--channels auto`; a saturated channel gets no weight).
+3. **Line strength**: the step of log(brightness) over 18 px (`--jump-width`, scaled), both up and down, and a thin-line value, as the median over 6 bands of rows (dust in a few rows does not count), in local noise sigmas. The noise has a floor of about a third of a brightness level, so in flat dark areas, where the image sits on one level and then moves one level, that move is not a line.
+4. Every peak over `contrast_diff` sigmas (default 6, `--contrast-diff`) is a line, placed at the centre of its brightness change. A small step (under 6 levels) that happens within one pixel is a **JPEG block edge**, not a line, and is weakened accordingly.
+5. The gap rule (below), then the whole photo opens with the lines drawn in navy blue: `y` keeps them, `n` and then `+` (more lines), `-` (fewer) or a number, `q` stops. 15 tries at most.
+6. Every kept line keeps **its own shape** (template): a step down, a step up or a thin line.
 
-**Analysis** (every photo, the first included, in time order) with `--detector template` (default): the middle row and the rows above and below it (`--rows 3`), without the edges, are collapsed the same way, and the template is slid along them (a matched filter: lines are where the template fits best). It uses the whole shape of a line, dip and rise, not one difference, so faint lines stand out better from the noise.
-1. **Prediction**: the lines of the photo before are stretched (by up to ±4 %, or around the pattern's period when that says the spacing moved further) and shifted as a whole to where the filtered profile is highest. The lines spread or contract together along a ramp, so one bad line cannot pull its neighbours.
-2. Every predicted line is refined within ±15 % of the spacing (`--window`). It is found if the filter there is over 2 noise sigmas (`--min-sigma`) and over 35 % of the typical line. Beyond the outer lines the grid is extended; a new line there needs `contrast_diff` sigmas.
-3. **Period**: the pattern's period (autocorrelation, no lines needed) starts the grid fit, so the lines are counted on the right grid even when some are missed.
-4. Gap rule and grid fit → spacing, and its **uncertainty** `spacing_err_px` (from the scatter of the lines around the grid).
-5. The next photo follows the lines on the grid plus the grid positions of the missed ones, so a stray detection does not lead it astray.
+**Analysis** (every photo, the first included) with `--detector template` (default), on the middle row and the rows above and below it (`--rows 3`):
+1. The lines of the photo before are shifted and stretched (±6 %) together to where they fit best, then every line is searched within ±10 % of the spacing (`--window`). The match is the correlation of its shape in brightness times that in the brightness gradient (a gentle slope between lines looks like a step in brightness but not in the gradient); a line is found over 0.3.
+2. A line not found is followed at its predicted position and counted as a missed step of the spacing. Line shapes slowly follow the photos. New lines beyond the outer ones are found as in the preparation.
+3. **Spacing** = the mean of the distances between neighbouring lines (after the gap rule). The bands are uneven, so no regular grid is assumed. `std_spacing_px` is the spread of the distances (how uneven the bands are); `spacing_err_px` is how precisely the spacing is measured, from how far the 3-row lines lie from the same lines found on 300 rows (on the real photos it matches the spread between different 3-row strips, 0.1–0.3 px).
 
-`--detector threshold` is the previous detector: every line searched within ±20 % of the spacing for its largest jump.
+`--detector threshold` is the earlier detector (largest jump near each line).
 
-**Quality** of every photo (`quality` in `results.csv`: `ok` or the reasons). A photo is doubtful when the lines are weak (median filter value under 3 sigmas), fewer than 60 % of the predicted lines are found, the lines are more than 15 % of the spacing off a regular grid (rms), the period and the spacing disagree by more than 5 %, or the spacing jumped by more than 8 % from the photo before.
+**Quality** (`quality` in `results.csv`: `ok` or the reasons). A photo is doubtful when the median match of its lines is under 0.5, fewer than 75 % of the lines in the picture are found, the spacing changed by more than 8 % from the photo before, a distance is over 1.7× the average (a missed line makes ~2×; the widest real band was 1.4×), or the lines differ from a **300-row check** (`--check-rows`, 0 = off): the same photo's middle 300 rows are searched as in the preparation; a strong line there (1.5× the limit) that is not followed, or a followed line with nothing there even at half the limit, makes the photo doubtful. The check only decides whether to ask; the spacing is always that of the 3 rows.
 
-**Asking** (`--ask`):
-- `doubtful` (default): a doubtful photo opens: `y` keeps it, `n` runs the preparation again on it and measures it again, `q` stops and writes what was done. A line coming or going no longer stops the run.
-- `count`: as before, when the number of lines changes.
-- `review`: nothing is asked during the run. Afterwards `overview.png` (spacing against the photo, doubtful photos in red) opens, then every doubtful photo: `y` keep, `x` exclude (warning `excluded in review`, left out of the report), `p` prepare again on it and measure it again, `q` stop reviewing.
-- `--yes` asks nothing.
+**Asking** (`--ask`): `doubtful` (default) shows a doubtful photo (`y` keep, `n` prepare again on it, `q` stop); `count` asks when the number of lines changes; `review` asks nothing during the run and then shows `overview.png` and every doubtful photo (`y` keep, `x` exclude, `p` prepare again, `q` stop). `--yes` asks nothing: a doubtful photo is **prepared again automatically** and measured again (`checked` in `lines.csv` says why).
 
-**Gap rule** (every photo and the preparation): a distance between neighbouring lines below ½ of the average distance means a false line; of its two lines, the one whose removal leaves the distances closest to the typical one is excluded, until no such distance is left. A distance over 2× the average (lines lost) is left out: the lines are split there, and the spacing is the grid fit of the parts together. The average is that of the normal distances (starting from the median, distances outside ½–2× of it are left out of it), so a big hole cannot make normal distances look too short. Excluded lines are drawn dotted red, are not followed in the next photo and count in `n_extra`; lines lost in long distances count in `n_missing`.
+**Gap rule** (every photo and the preparation): a distance below ½ of the average distance (the average of the normal distances) means a possible false line: the weaker line of the pair is excluded, but only if it is weaker than 0.4× the median line, so real narrow bands (two strong lines) stay. A distance over 2× the average (lines lost) is left out of the spacing. Excluded lines are drawn dotted red and counted in `n_extra`; lines lost in long distances and followed lines not found count in `n_missing`.
 
 ```text
 output/jumps/<name>/
@@ -198,27 +193,31 @@ output/jumps/<name>/
 │                        period_vs_spacing_pct, snr, coverage, x_px, excluded_x, long_gaps
 ├── overview.png         spacing (± error) against the photo, doubtful photos in red
 ├── parameters.json      settings and every preparation (contrast_diff, channel weights,
-│                        template, initial positions)
+│                        number of line templates, initial positions)
 ├── preparation/         try<N>_<photo>.jpg of every preparation try
 └── <photo>_marked.jpg   the whole photo, lines in navy blue, excluded lines dotted red
 ```
 
-x positions are those of the whole photo. For the report: `analysis report NAME --results output/jumps/NAME/results.csv`; the report then draws `spacing_err_px` as error bars and weights the fits by it (1/error², error at least a tenth of the median error).
+x positions are those of the whole photo. For the report: `analysis report NAME --results output/jumps/NAME/results.csv` (error bars and weighted fits from `spacing_err_px`).
 
-How well it works, from `analysis bench` (24 synthetic photos per series; error of the spacing per photo; "bad" = over 2 % off):
-
-| series | contrast (folder) | jumps threshold | jumps template |
-|---|---|---|---|
-| dark (like 08) | median 37 %, bad 20/24 | median 1.8 %, bad 12/24 | **median 0.25 %, bad 0/24** |
-| dark, wide spacing | median 3.6 %, bad 14/24 | median 4.4 %, bad 17/24 | **median 0.34 %, bad 1/24** |
-| dark, many faint lines | median 296 %, bad 24/24 | median 2.9 %, bad 14/24 | **median 0.31 %, bad 0/24** |
-| bright (orange) | median 0.30 %, bad 0/24 | median 0.40 %, bad 6/24 | **median 0.07 %, bad 0/24** |
-
-On the real photo 08_0000, 40 different 3-row strips gave 220.1 ± 1.5 px with the template detector and 220.7 ± 2.5 px with the threshold one (true ≈ 221 px).
+**Tested on the real photos** (`tests/test_real_photos.py`, 8 photos of series 08, 74 lines):
+- preparation (300 rows): 74/74 lines, no false line;
+- analysis (middle 3 rows): every line in every photo, spacing within 0.25 % of the hand-marked one;
+- all 8 as one series prepared only on the first (30–80 frames apart, so the lines move a lot): the photos where following fails are found doubtful by the 300-row check and prepared again; then every line is right;
+- 41 different 3-row strips per photo: 99.3 % of the lines.
 
 ### `analysis bench`
 
-Makes synthetic photo series whose line positions are known and scores the methods on them: the folder's contrast method, `analysis jumps --detector threshold` and `--detector template`. The photos imitate the real ones: `dark` like series 08 (only red bright, lines 2–5 levels deep, JPEG, dark edges), `bright` like the orange pE-300 photos; the spacing follows a ramp, the gaps are uneven by a few %, some lines are faint, the lines wiggle along y, and there is dust and a fixed scratch. It prints, per series and method, the median and 95th percentile of the spacing error, the photos over 2 % off, the fraction of the lines found and the false lines per photo. `--photos N` sets the photos per series. Use it to check that a change to a method helps.
+Makes synthetic photo series whose line positions are known and scores the methods on them: the folder's contrast method, `analysis jumps --detector threshold` and `--detector template` (as with `--yes`). The photos imitate the real ones in `tests/data/real`: steps down left of the bright centre and up right of it, a thin line at every line, uneven bands (0.45–1.4× the spacing, some narrow), dark vignetted edges, JPEG, ~1.5 px optical blur, dust and a fixed scratch; `dark` like series 08, `bright` like the orange pE-300 photos. It prints, per series and method, the median and 95th percentile of the spacing error, the photos over 2 % off, the share of lines found and the false lines per photo. `--photos N` sets the photos per series.
+
+| series | contrast (folder) | jumps threshold | **jumps template** |
+|---|---|---|---|
+| dark | median 9.3 %, bad 21/24 | median 10.1 %, bad 23/24 | **median 0.05 %, bad 5/24, 98 % of lines** |
+| dark, wide | median 12.2 %, bad 21/24 | median 6.6 %, bad 23/24 | **median 0.05 %, bad 8/24, 95 %** |
+| dark, low contrast | median 13.0 %, bad 22/24 | median 17.6 %, bad 24/24 | **median 1.7 %, bad 12/24, 90 %** |
+| bright | median 5.4 %, bad 24/24 | median 18.4 %, bad 24/24 | **median 0.02 %, bad 6/24, 100 %** |
+
+("bad" = over 2 % off.) Most remaining bad photos have a faint centre line inside a narrow band, which the gap rule takes for a false line; the real photos did not have that case.
 
 ### `analysis report NAME`
 

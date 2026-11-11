@@ -4,16 +4,17 @@
 positions are known, runs the detection methods on them and prints how close
 each comes to the true spacing. The photos imitate the real ones:
 
-  dark    red light like series 08: only R is bright (~105 in the middle,
-          darker towards the edges), G and B nearly 0; a line is a dip of
-          ~2 % followed by a step up of ~4 %, i.e. 2-5 brightness levels;
-          JPEG compressed (quality 92), so the noise between rows is only
-          ~0.3 levels and the whole-level steps dominate.
+  dark    red light like series 08: only R is bright (~110 in the middle,
+          down to ~10 at the edges), G and B nearly 0; the lines are steps
+          down left of the centre and up right of it (large at the edges, a
+          thin 2 % line at the centre), JPEG compressed (quality 92), so the
+          noise between rows is only ~0.3 levels.
   bright  orange like the pE-300 photos: R saturated, G ~130; contrast ~3x.
 
 Every series: the spacing follows a ramp (up and down) and the lines spread
-from a fixed point; the gaps are uneven by a few %, some lines are faint, the
-lines wiggle by ~1 px along y, and there is dust and a fixed scratch.
+from the centre; the bands are uneven (0.45-1.4 x the spacing, some narrow),
+the lines wiggle by ~1 px along y, and there is dust and a fixed scratch.
+Made to look like the real photos in tests/data/real (compare their profiles).
 
 Score per method and series (photo by photo, against the true positions in
 the analysed part of the photo):
@@ -28,7 +29,6 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 
-from .spacing import fit_grid
 
 
 @dataclass
@@ -38,39 +38,53 @@ class SeriesSpec:
     n: int = 24                   # photos
     width: int = 2400
     height: int = 400
-    spacing: tuple = (95.0, 125.0)   # px at the ramp ends (up, then down again)
-    faint: float = 0.35           # fraction of lines at 30-60 % strength
+    spacing: tuple = (210.0, 260.0)  # px at the ramp ends (up, then down again)
+    faint: float = 0.35           # fraction of lines whose thin line is at 30-60 %
+    contrast: float = 1.0         # scale of all line contrasts
     seed: int = 0
 
 
 def _background(spec, rng):
     x = np.linspace(-1, 1, spec.width)
     y = np.linspace(-1, 1, spec.height)
-    vig = np.clip(1 - 0.85 * np.abs(x) ** 2.2, 0.15, 1)                 # dark edges in x
+    vig = np.clip(1 - 0.95 * np.abs(x) ** 1.8, 0.06, 1)                 # dark edges in x
     return np.outer(1 - 0.03 * y ** 2, vig)
 
 
 def _scene(spec, spacing, phase, irregular, strength, rng):
-    """(gray 0..1 relative image, true x of the lines in the middle row)."""
+    """(relative brightness change, true x of the lines in the middle row).
+
+    As in the real photos of series 08: every band between two lines gets
+    brighter towards the bright centre of the photo and changes by a step at
+    the line, so the step goes DOWN left of the centre and UP right of it, and
+    is large in the dark edges and small near the centre; every line also has
+    a thin dark line (~2 %), which is all that is left of it at the centre.
+    The bands are uneven (``irregular``: widths 0.45-1.4 x the spacing).
+    """
     W, H = spec.width, spec.height
-    centre = 0.45 * W
-    k = np.arange(-40, 41)
-    base = centre + (k + phase) * spacing + irregular[: len(k)] * spacing
+    centre = 0.5 * W
+    widths = spacing * irregular
+    k0 = int(np.argmin(np.abs(np.cumsum(widths) - 0.5 * len(widths) * spacing)))
+    base = np.cumsum(widths) - np.cumsum(widths)[k0] + centre + phase * spacing
     keep = (base > -spacing) & (base < W + spacing)
-    xs0, amp = base[keep], strength[: len(k)][keep]
+    idx = np.flatnonzero(keep)
+    xs0, amp = base[keep], strength[idx]
     rows = np.arange(H)
     img = np.zeros((H, W))
     xx = np.arange(W)[None, :]
     wig = rng.normal(0, 1, (len(xs0), H // 20 + 2)).cumsum(axis=1) * 0.35   # ~1 px wiggle
-    for i, (x0, a) in enumerate(zip(xs0, amp)):
-        xr = x0 + np.interp(rows, np.arange(wig.shape[1]) * 20, wig[i])[:, None]
-        nxt = xs0[i + 1] if i + 1 < len(xs0) else x0 + spacing
-        # sawtooth: brighter right after the line, falling towards the next one
-        inside = (xx >= xr) & (xx < xr + (nxt - x0))
-        img += inside * a * 0.04 * (0.5 - (xx - xr) / (nxt - x0))
-        # the dark dip just before the line, ~3 % of the spacing wide
-        img -= a * 0.02 * np.exp(-0.5 * ((xx - (xr - 0.025 * spacing)) / (0.012 * spacing)) ** 2)
     t = np.arange(wig.shape[1]) * 20
+    xr_all = [x0 + np.interp(rows, t, wig[i])[:, None] for i, x0 in enumerate(xs0)]
+    for i in range(len(xs0) - 1):
+        xa, xb = xr_all[i], xr_all[i + 1]
+        mid = 0.5 * (xs0[i] + xs0[i + 1])
+        a = spec.contrast * (0.02 + 0.45 * min(abs(mid - centre) / (0.5 * W), 1) ** 1.3)
+        sgn = 1.0 if mid < centre else -1.0
+        inside = (xx >= xa) & (xx < xb)
+        img += inside * sgn * a * ((xx - xa) / np.maximum(xb - xa, 1) - 0.5)
+    for i, a in enumerate(amp):
+        img -= a * spec.contrast * 0.02 * np.exp(
+            -0.5 * ((xx - xr_all[i]) / (0.012 * spacing)) ** 2)
     true_mid = np.array([x0 + np.interp(H // 2, t, wig[i]) for i, x0 in enumerate(xs0)])
     return img, np.sort(true_mid)
 
@@ -90,10 +104,14 @@ def make_photo(spec, spacing, phase, irregular, strength, seed):
     """(RGB uint8 photo as it comes out of the camera (JPEG), true line x)."""
     rng = np.random.default_rng(seed)
     rel, xs = _scene(spec, spacing, phase, irregular, strength, rng)
+    # the optics spread a line over a few px (as in the real photos)
+    k = np.exp(-0.5 * (np.arange(-5, 6) / 1.5) ** 2)
+    k /= k.sum()
+    rel = np.apply_along_axis(lambda r: np.convolve(r, k, mode="same"), 1, rel)
     rel = _defects(spec, np.random.default_rng(spec.seed + 999), rel)    # dust stays put
     light = _background(spec, rng) * (1 + rel)
     if spec.kind == "dark":
-        r = 107 * light + rng.normal(0, 0.9, light.shape)
+        r = 112 * light + rng.normal(0, 0.9, light.shape)
         g = 0.7 + rng.normal(0, 0.5, light.shape)
         b = 6 * light + rng.normal(0, 0.6, light.shape)
         scale = 3.0
@@ -115,8 +133,8 @@ def make_series(spec):
     s0, s1 = spec.spacing
     half = spec.n // 2
     ramp = np.r_[np.linspace(s0, s1, half), np.linspace(s1, s0, spec.n - half)]
-    irregular = rng.normal(0, 0.03, 81).cumsum() * 0.3                   # uneven gaps (~3 %)
-    irregular -= np.linspace(irregular[0], irregular[-1], 81)
+    irregular = np.clip(rng.normal(1.0, 0.15, 81), 0.45, 1.4)            # uneven bands
+    irregular[rng.choice(81, 8, replace=False)] = rng.uniform(0.4, 0.6, 8)  # narrow ones
     strength = np.where(rng.random(81) < spec.faint, rng.uniform(0.3, 0.6, 81),
                         rng.uniform(0.8, 1.2, 81))
     phase = rng.uniform(0, 1)
@@ -125,16 +143,20 @@ def make_series(spec):
 
 
 def true_spacing(xs, lo, hi):
+    """Mean distance between the neighbouring true lines in [lo, hi] (bands are uneven)."""
     inside = [x for x in xs if lo <= x <= hi]
-    fit = fit_grid(inside)
-    return fit.spacing if fit else None, inside
+    return (float(np.mean(np.diff(inside))) if len(inside) >= 2 else None), inside
 
 
-def score(found, xs, lo, hi):
-    """(error % of the spacing, hits, false) of found lines vs true x in [lo, hi]."""
+def score(found, xs, lo, hi, spacing=None):
+    """(error % of the spacing, hits, false) of found lines vs true x in [lo, hi].
+
+    ``spacing``: the method's own spacing (default: from the found lines).
+    """
     from .jumps import spacing_with_rule
     sp_true, inside = true_spacing(xs, lo, hi)
-    sp = spacing_with_rule(found).spacing if len(found) >= 2 else None
+    sp = spacing if spacing is not None else (
+        spacing_with_rule(found).spacing if len(found) >= 2 else None)
     if sp is None or sp_true is None:
         return np.nan, 0, len(found)
     tol = 0.08 * sp_true
@@ -154,14 +176,18 @@ def method_contrast(series):
         h = img.shape[0]
         strip = img[(h - 300) // 2:(h - 300) // 2 + 300, 100:-100]
         out.append([x + 100 for x, _ in C.find_features(C.contrast_profile(strip))])
-    return out, 100
+    return out, None, 100
 
 
 def method_jumps(series, detector):
-    """analysis jumps, non-interactive, with the given detector."""
+    """analysis jumps, non-interactive (--yes), with the given detector."""
+    from .detect import REF_WIDTH
     from .jumps import JumpConfig, run_series
     cfg = JumpConfig(detector=detector)
-    return run_series([img for img, _ in series], cfg), cfg.edge
+    res = run_series([img for img, _ in series], cfg, details=True)
+    edge = int(round(cfg.edge * series[0][0].shape[1] / REF_WIDTH))
+    margin = 30 if detector == "template" else 0
+    return [r.lines for r in res], [r.spacing.spacing for r in res], edge + margin
 
 
 METHODS = {
@@ -171,10 +197,11 @@ METHODS = {
 }
 
 DEFAULT_SERIES = (
-    SeriesSpec("dark", "dark", seed=1),
-    SeriesSpec("dark, wide", "dark", spacing=(150.0, 210.0), seed=2),
-    SeriesSpec("dark, many faint", "dark", faint=0.6, seed=3),
-    SeriesSpec("bright", "bright", seed=4),
+    SeriesSpec("dark", "dark", spacing=(210.0, 260.0), seed=1),
+    SeriesSpec("dark, wide", "dark", spacing=(270.0, 340.0), seed=2),
+    SeriesSpec("dark, low contrast", "dark", spacing=(210.0, 260.0), faint=0.6, contrast=0.6,
+               seed=3),
+    SeriesSpec("bright", "bright", spacing=(210.0, 260.0), seed=4),
 )
 
 
@@ -185,8 +212,14 @@ def run_bench(series_specs=DEFAULT_SERIES, methods=None, verbose=True):
     for spec in series_specs:
         series = make_series(spec)
         for name, method in methods.items():
-            found, edge = method(series)
-            rows = [score(f, xs, edge, spec.width - edge) for f, (_, xs) in zip(found, series)]
+            found, spacings, edge = method(series)
+            spacings = spacings or [None] * len(found)
+            # the true spacing over the same span as the found lines (the bands are
+            # uneven, so a line more or less at the edge changes the mean distance)
+            rows = [score(f, xs, max(edge, min(f) - 15) if len(f) else edge,
+                          min(spec.width - edge, max(f) + 15) if len(f) else spec.width - edge,
+                          sp)
+                    for f, sp, (_, xs) in zip(found, spacings, series)]
             err = np.abs(np.array([r[0] for r in rows], float))
             n_true = np.mean([len(true_spacing(xs, edge, spec.width - edge)[1])
                               for _, xs in series])

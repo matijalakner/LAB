@@ -12,12 +12,14 @@ from line_analysis.jumps import (MAX_TRIES, NAVY, Analyser, JumpConfig, _next_va
 GRID = 300 + 100 * np.arange(12)        # 300 ... 1400 in a 1700 px photo
 
 
-def _photo(path, xs, width=1700, height=600, seed=0):
-    """Dark 3 px lines on a grey background: the contrast jumps up on their right side."""
+def _photo(path, xs, width=1700, height=600, seed=0, faint=()):
+    """Dark 3 px lines on a grey background (``faint`` x: only slightly darker)."""
     rng = np.random.default_rng(seed)
     img = np.full((height, width, 3), 180, np.float32) + rng.normal(0, 2, (height, width, 3))
     for x in xs:
         img[:, int(x) - 1:int(x) + 2] = 60
+    for x in faint:
+        img[:, int(x) - 1:int(x) + 2] = 165
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(np.clip(img, 0, 255).astype(np.uint8)).save(path)   # png: no jpeg blur
 
@@ -87,7 +89,7 @@ def test_non_interactive_run(dirs):
 
 def test_edges_are_cut(dirs):
     inp, out = dirs
-    _folder(inp, [np.r_[100, GRID, 1600]])                  # lines inside the 200 px edges
+    _folder(inp, [np.r_[30, GRID, 1670]])            # inside the edges (57 px at 1700 px)
     main_jumps("j", out, inp, interactive=False, show=False)
     assert _read(out, file="lines.csv")[0]["n_lines"] == "12"
 
@@ -182,8 +184,11 @@ def test_tracking_keeps_a_lost_line_and_does_not_fill_it_with_noise():
 def test_extra_line_between_tracked_lines_is_ignored(dirs):
     inp, out = dirs
     _folder(inp, [GRID, np.r_[GRID, 1450], GRID + 3])
-    rows = main_jumps("j", out, inp, show=False, ask=_answers("y"))   # nothing else asked
+    ask = _answers("y", "y")              # preparation; photo 2: the 300-row check sees 1450
+    main_jumps("j", out, inp, show=False, ask=ask)
+    assert sum("Is this okay" in q for q in ask.asked) == 2
     assert [r["n_lines"] for r in _read(out, file="lines.csv")] == ["12", "12", "12"]
+    assert "not followed at x=1450" in _read(out)[1]["quality"]
 
 
 def test_new_lines_at_the_edges():
@@ -203,8 +208,10 @@ def test_period_cross_check():
 
 def test_sizes_scale_with_the_width():
     an = Analyser(JumpConfig())
-    assert an.sizes(np.zeros((1, 6000, 3))) == (16, 25)
-    assert an.sizes(np.zeros((1, 3000, 3))) == (8, 12)
+    assert an.sizes(np.zeros((1, 6000, 3))) == (18, 47)
+    assert an.edge_px(np.zeros((1, 6000, 3))) == 200 and an.edge_px(np.zeros((1, 3000, 3))) == 100
+    ls = an.line_sizes(np.zeros((1, 3000, 3)))
+    assert (ls.w, ls.half) == (4, 35)
     assert Analyser(JumpConfig(jump_width=1)).sizes(np.zeros((1, 3000, 3)))[0] == 1
 
 
@@ -230,17 +237,29 @@ def test_gap_rule_leaves_long_distances_out():
     assert sp.n_missing == 3
 
 
-def test_gap_rule_keeps_regular_lines_and_one_missed_line():
-    from line_analysis.jumps import spacing_with_rule
-    xs = np.delete(100 + 100 * np.arange(12), 5)              # one 2x gap: 1.8x the average
+def test_one_missed_line_is_flagged():
+    from line_analysis.jumps import Analyser, Measurement, spacing_with_rule
+    xs = list(np.delete(100 + 100 * np.arange(12), 5).astype(float))   # one 2x distance
     sp = spacing_with_rule(xs)
-    assert not sp.excluded and not sp.long_gaps
-    assert np.isclose(sp.spacing, 100) and sp.n_missing == 1   # the grid fit handles it
+    assert not sp.excluded and not sp.long_gaps and np.isclose(sp.spacing, 110)
+    doubts = Analyser(JumpConfig(check_rows=0)).doubts(Measurement(xs, sp, xs))
+    assert any("line may be missing" in d for d in doubts)
+
+
+def test_uneven_bands_are_kept_with_strengths():
+    from line_analysis.jumps import spacing_with_rule
+    xs = [100, 400, 680, 1000, 1290, 1392, 1790, 2130]        # like 08_0122: a 102 px band
+    sp = spacing_with_rule(xs, strengths=[30, 35, 40, 33, 20, 35, 12, 30])
+    assert sp.lines == xs and np.isclose(sp.spacing, np.mean(np.diff(xs)))
+    sp = spacing_with_rule(xs + [1340], strengths=[30, 35, 40, 33, 20, 35, 12, 30, 5])
+    assert sp.excluded == [1340] and sp.n_extra == 1           # a weak line in the band goes
 
 
 def test_false_line_in_the_preparation_is_excluded(dirs):
     inp, out = dirs
-    _folder(inp, [np.r_[GRID, GRID[3] + 30], GRID, GRID])
+    for k, xs in enumerate([GRID, GRID, GRID]):                 # a faint line 30 px from one
+        _photo(inp / "folder" / "j" / f"j_{k:04d}.png", xs, seed=k,
+               faint=[GRID[3] + 30] if k == 0 else ())
     main_jumps("j", out, inp, interactive=False, show=False)
     params = json.loads((out / "jumps" / "j" / "parameters.json").read_text())
     assert len(params["preparations"][0]["initial_positions"]) == 12
@@ -275,22 +294,23 @@ def test_review_mode_asks_only_at_the_end(dirs):
     assert _read(out, file="lines.csv")[1]["checked"] == "excluded"
 
 
-def test_template_from_the_preparation():
-    from line_analysis.jumps import make_template, matched
-    xs = 100 + 100 * np.arange(11)
-    p = _noisy_profile(xs, depth=0.3, noise=0.01)
-    t, half = make_template(p, list(xs + 2), 100)
-    assert np.isclose(np.linalg.norm(t), 1) and abs(t.mean()) < 1e-9 and half == 30
-    m = matched(_noisy_profile(xs + 7, depth=0.1, noise=0.02, seed=5), t)
-    peaks = [i for i in range(1, len(m) - 1) if m[i] > m[i - 1] and m[i] >= m[i + 1]
-             and m[i] > 0.5 * m.max()]
-    assert len(peaks) == 11 and np.allclose(peaks, xs + 7 + 2, atol=2)
-
-
-def test_grid_fit_hint_counts_steps_on_the_period():
-    from line_analysis.jumps import spacing_with_rule
-    xs = [100, 300, 500, 600, 800]                              # 4 of 7 every 100 px ... 
-    assert np.isclose(spacing_with_rule(xs, hint=100).spacing, 100)
+def test_every_line_keeps_its_own_shape():
+    from line_analysis.lines import make_templates, track
+    x = np.arange(1200.0)
+    L = np.zeros_like(x)
+    lines = [200, 450, 700, 950]
+    for k, xl in enumerate(lines):                    # steps down, then up (as in the photos)
+        L += (-0.2 if k < 2 else 0.2) * (x >= xl)
+    temps = make_templates(L, lines, 20)
+    assert np.dot(temps[0][0], temps[3][0]) < -0.5    # opposite steps: opposite shapes
+    rng = np.random.default_rng(0)
+    moved = np.zeros_like(x)
+    for k, xl in enumerate(lines):
+        moved += (-0.2 if k < 2 else 0.2) * (x >= xl * 1.03 + 12)
+    moved += rng.normal(0, 0.01, len(x))
+    found, score, _ = track(moved, lines, temps, 250)
+    assert np.allclose(found, [xl * 1.03 + 12 for xl in lines], atol=2)
+    assert min(score) > 0.8
 
 
 def test_weighted_fit_follows_the_precise_points():
