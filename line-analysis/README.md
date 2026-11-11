@@ -164,26 +164,31 @@ A separate method from `analysis folder`; it writes to `output/jumps/NAME/`.
 
 **Preparation** (on the first photo):
 1. The middle 300 rows are cut out (`--prep-rows`), and 200 px are cut off the left and the right (`--edge-crop`).
-2. The contrast of every pixel, `(I − background) / background` as in the contrast detection, is averaged over the rows: one value per x.
-3. The jump between neighbouring pixels, `c(x+1) − c(x)`, is computed. Every positive jump larger than `contrast_diff` is a line; within 10 px only the largest counts.
-4. The whole photo opens with every line drawn in navy blue from top to bottom. Answer `y` to keep it, `n` and then `+` (more lines: lower `contrast_diff`), `-` (fewer lines: raise it) or a number, or `q` to stop. After 15 tries it stops by itself. The kept `contrast_diff` and the lines (the initial positions) go to `parameters.json`.
+2. Brightness: the colour channels weighted by how bright they are (`--channels auto`). Under red light green and blue are nearly black and would only add noise; a channel with more than 5 % saturated pixels shows no contrast and gets no weight. `mean`, `r`, `g`, `b` choose otherwise.
+3. The contrast of every pixel, `(I − background) / background` with the background a moving median along x, is averaged over the rows: one value per x.
+4. Jump: `c(x + w/2) − c(x − w/2)` over `--jump-width` w px (16 for a 6000 px wide photo, scaled with the width; 1 = neighbouring pixels). An edge is spread over several px, so the wider jump collects all of it while the noise stays the same.
+5. Every positive jump larger than `contrast_diff` is a line; within 25 px (scaled) only the largest counts. **`contrast_diff` is in noise sigmas** of the photo (the robust spread of its jumps), so it means the same in a bright and in a dark photo. It starts at `--contrast-diff` (default 6).
+6. The whole photo opens with every line drawn in navy blue from top to bottom. Answer `y` to keep it, `n` and then `+` (more lines: lower `contrast_diff`), `-` (fewer lines: raise it) or a number, or `q` to stop. After 15 tries it stops by itself. It also prints how many lines the 3-row analysis strip then finds.
 
-`contrast_diff` starts at `--contrast-diff`, or else at 6 noise sigmas of the jumps of the 3-row strip, because the same value is used there.
-
-**Analysis** (every photo, the first included, in time order): the middle row and the rows above and below it (`--rows 3`), without the edges, are collapsed and searched for jumps the same way. When a photo has a different number of lines than the photo before it (the first photo: than the preparation), its marked photo opens: `y` continues with the new count, `n` runs the preparation again on this photo and analyses it again with the new value, `q` stops and writes what was done. `--yes` asks nothing.
+**Analysis** (every photo, the first included, in time order): the middle row and the rows above and below it (`--rows 3`), without the edges, are collapsed the same way.
+- **Tracking** (default; `--no-track` searches the whole strip): every line is searched only within ±20 % of the spacing (`--window`) around its position in the photo before (the first photo: the preparation). Its largest jump there is taken if it is over `--min-sigma` (2) noise sigmas and over 35 % of the typical jump of the lines of this photo. Noise between the lines cannot become a line, and in a bright photo an empty window is not filled with a noise peak. A line not found keeps its old position for the next photo. New lines are searched beyond the outermost lines (where lines come into the picture) at `contrast_diff` sigmas.
+- When a photo has a different number of lines than the photo before it, its marked photo opens: `y` continues with the new count, `n` runs the preparation again on this photo and analyses it again, `q` stops and writes what was done. `--yes` asks nothing.
+- **Cross-check**: the period of the collapsed contrast, from its autocorrelation (no lines needed), is compared with the spacing. `lines.csv` has both, and a difference over 5 % is printed.
 
 ```text
 output/jumps/<name>/
 ├── results.csv          as in analysis folder (spacing from the grid fit, n_missing, n_extra)
-├── lines.csv            photo, file, n_lines, contrast_diff, checked (accepted / prepared again), x_px
-├── parameters.json      settings and every preparation (photo, contrast_diff, initial positions)
+├── lines.csv            photo, file, n_lines, contrast_diff, checked (accepted / prepared again),
+│                        period_px, period_vs_spacing_pct, x_px
+├── parameters.json      settings and every preparation (photo, contrast_diff, channel weights,
+│                        initial positions)
 ├── preparation/         try<N>_<photo>.jpg of every preparation try
 └── <photo>_marked.jpg   the whole photo, lines in navy blue
 ```
 
 x positions are those of the whole photo. For the report: `analysis report NAME --results output/jumps/NAME/results.csv`.
 
-Three rows give a noisy profile: on dark photos, where the lines are only a few brightness levels deep, the noise jumps can be as large as those of the lines. The preparation shows how many lines the 3-row strip gives with each value; `--rows 20` or more helps on such photos.
+On a dark photo (08_0000, lines 1–3 brightness levels deep), 40 different 3-row strips gave a spacing of 220.8 ± 2.2 px with these defaults (true ≈ 221 px); with neighbouring-pixel jumps, the mean of R, G and B and no tracking, 3 rows gave mostly noise lines. Brighter photos (longer exposure, more gain, or the FLIR's 16-bit files) make every method better.
 
 ### `analysis report NAME`
 

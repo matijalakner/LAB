@@ -132,14 +132,28 @@ def build_parser():
                                        "the first photo, then the middle 3 rows of every photo.")
     jmp.add_argument("path", help="measurement name (input/folder/NAME) or a folder of photos")
     jmp.add_argument("--contrast-diff", type=float, default=None,
-                     help="jump of the collapsed contrast between neighbouring pixels that "
-                          "makes a line (default: suggested from the first photo)")
+                     help="jump that makes a line in the preparation, in noise sigmas of "
+                          "the photo (default 6); also used for new lines at the edges")
     jmp.add_argument("--edge-crop", type=int, default=200, metavar="PX",
                      help="px cut off the left and the right (default 200)")
     jmp.add_argument("--prep-rows", type=int, default=300,
                      help="rows of the preparation strip (default 300)")
     jmp.add_argument("--rows", type=int, default=3,
                      help="rows of the analysis strip around the middle row (default 3)")
+    jmp.add_argument("--jump-width", type=int, default=16, metavar="PX",
+                     help="jump = c(x + w/2) - c(x - w/2) over this many px of a 6000 px wide "
+                          "photo, scaled with the width (default 16; 1 = neighbouring pixels)")
+    jmp.add_argument("--channels", choices=("auto", "mean", "r", "g", "b"), default="auto",
+                     help="brightness from: auto = channels weighted by their brightness, "
+                          "saturated ones left out (default); mean; or one channel")
+    jmp.add_argument("--no-track", action="store_true",
+                     help="search the whole strip of every photo instead of near the lines "
+                          "of the photo before")
+    jmp.add_argument("--window", type=float, default=0.2,
+                     help="tracking: search +- this fraction of the spacing (default 0.2)")
+    jmp.add_argument("--min-sigma", type=float, default=2.0,
+                     help="tracking: a line's jump must be over this many noise sigmas "
+                          "(default 2)")
     jmp.add_argument("--yes", action="store_true",
                      help="do not ask: keep the first contrast_diff and every line count")
     jmp.add_argument("--no-show", action="store_true", help="do not open the image viewer")
@@ -232,7 +246,10 @@ def run(args):
         from .jumps import JumpConfig, main_jumps
         main_jumps(args.path, args.output_dir, args.input_dir,
                    JumpConfig(contrast_diff=args.contrast_diff, edge=args.edge_crop,
-                              prep_rows=args.prep_rows, rows=args.rows),
+                              prep_rows=args.prep_rows, rows=args.rows,
+                              jump_width=args.jump_width, channels=args.channels,
+                              track=not args.no_track, window=args.window,
+                              min_sigma=args.min_sigma),
                    interactive=not args.yes, show=not args.no_show)
     elif args.command == "report":
         from .report import main_report
