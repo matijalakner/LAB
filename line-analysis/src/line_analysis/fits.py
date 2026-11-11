@@ -94,12 +94,14 @@ def _evaluate(model, params, x):
     return _basis(model, x, params[1]) @ lin
 
 
-def _lstsq(model, x, y, s):
+def _lstsq(model, x, y, s, w=None):
+    """Least squares (weighted with ``w`` when given) -> (coef, weighted rss)."""
     B = _basis(model, x, s)
     if not np.all(np.isfinite(B)):
         return None, np.inf
-    coef, *_ = np.linalg.lstsq(B, y, rcond=None)
-    rss = float(((y - B @ coef) ** 2).sum())
+    sw = np.ones_like(y) if w is None else np.sqrt(w)
+    coef, *_ = np.linalg.lstsq(B * sw[:, None], y * sw, rcond=None)
+    rss = float((((y - B @ coef) * sw) ** 2).sum())
     return coef, rss
 
 
@@ -112,9 +114,9 @@ def _shape_grid(model, x):
     return np.geomspace(span / 10, span * 50, 200)
 
 
-def _fit_one(model, x, y):
+def _fit_one(model, x, y, w=None):
     if model in ("linear", "quadratic", "cubic"):
-        coef, rss = _lstsq(model, x, y, None)
+        coef, rss = _lstsq(model, x, y, None, w)
         return tuple(float(v) for v in coef), rss
     if model in ("power", "mm") and np.any(x < 0):
         return None, np.inf
@@ -122,7 +124,7 @@ def _fit_one(model, x, y):
     best = (None, np.inf, None)
     for _ in range(3):                            # coarse grid, then two refinements
         for s in grid:
-            coef, rss = _lstsq(model, x, y, s)
+            coef, rss = _lstsq(model, x, y, s, w)
             if rss < best[1]:
                 best = (coef, rss, s)
         if best[2] is None:
@@ -134,33 +136,50 @@ def _fit_one(model, x, y):
     return (float(coef[0]), float(s), float(coef[1])), rss
 
 
-def fit_curve(x, y, model="linear"):
+def fit_curve(x, y, model="linear", sigma=None):
     """Least-squares fit of ``model`` (or the best by AICc for 'auto') -> Fit or None.
 
     None when there are too few finite points (fewer than the parameters, or
     an x range of zero). 'auto' only considers models with at least
     parameters + 2 points, so AICc is defined; with fewer points it fits a line.
+    ``sigma``: the uncertainty of every y; the fit then weights the points by
+    1 / sigma^2 (sigma is kept at least a tenth of its median, so one point
+    with a tiny error bar cannot pull the whole curve). R^2, rmse and AICc are
+    then weighted too.
     """
     x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
     keep = np.isfinite(x) & np.isfinite(y)
+    w = None
+    if sigma is not None:
+        sig = np.asarray(sigma, dtype=float)
+        keep &= np.isfinite(sig) & (sig > 0)
     x, y = x[keep], y[keep]
+    if sigma is not None and keep.any():
+        sig = sig[keep]
+        sig = np.maximum(sig, 0.1 * np.median(sig))
+        w = 1 / sig ** 2
+        w = w / w.mean()                     # mean weight 1: rss on the usual scale
+        sigma = sig
     n = len(x)
     if n < 2 or np.ptp(x) == 0:
         return None
     if model == "auto":
-        fits = [fit_curve(x, y, m) for m in AUTO_MODELS if n >= len(PARAM_NAMES[m]) + 2]
+        fits = [fit_curve(x, y, m, sigma) for m in AUTO_MODELS
+                if n >= len(PARAM_NAMES[m]) + 2]
         fits = [f for f in fits if f is not None]
         # too few points to compare models: a line, as before
-        return min(fits, key=lambda f: f.aicc) if fits else fit_curve(x, y, "linear")
+        return (min(fits, key=lambda f: f.aicc) if fits
+                else fit_curve(x, y, "linear", sigma))
     if model not in MODELS:
         raise ValueError(f"unknown fit '{model}'; choose from {', '.join(FIT_CHOICES)}")
     k = len(PARAM_NAMES[model])
     if n < k:
         return None
-    params, rss = _fit_one(model, x, y)
+    params, rss = _fit_one(model, x, y, w)
     if params is None:
         return None
-    ss_tot = float(((y - y.mean()) ** 2).sum())
+    ww = np.ones_like(y) if w is None else w
+    ss_tot = float((ww * (y - np.average(y, weights=ww)) ** 2).sum())
     r2 = 1 - rss / ss_tot if ss_tot else 1.0
     rss_n = max(rss / n, 1e-300)
     aic = n * np.log(rss_n) + 2 * k

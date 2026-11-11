@@ -98,7 +98,8 @@ def test_preparation_retries_then_count_change_is_asked(dirs):
     # far too high first (no lines), '+' lowers it, then a typed value; y.
     # Photo 3 has 2 lines fewer: y.
     ask = _answers("n", "+", "n", "+", "n", "20", "y", "y")
-    rows = main_jumps("j", out, inp, JumpConfig(contrast_diff=1e9), show=False, ask=ask)
+    rows = main_jumps("j", out, inp, JumpConfig(contrast_diff=1e9, ask="count"), show=False,
+                      ask=ask)
     assert len(rows) == 4
     lines = _read(out, file="lines.csv")
     assert [r["n_lines"] for r in lines] == ["12", "12", "10", "10"]
@@ -114,7 +115,7 @@ def test_no_at_a_count_change_prepares_again(dirs):
     # prep ok; photo 2 (a line gone) not ok -> prepare again on it: ok; photo 3 has
     # 12 again, one more than photo 2: ok
     ask = _answers("y", "n", "y", "y")
-    rows = main_jumps("j", out, inp, show=False, ask=ask)
+    rows = main_jumps("j", out, inp, JumpConfig(ask="count"), show=False, ask=ask)
     assert len(rows) == 3
     lines = _read(out, file="lines.csv")
     assert lines[1]["checked"] == "prepared again"
@@ -129,7 +130,8 @@ def test_quits_after_15_tries_and_on_q(dirs):
     assert main_jumps("j", out, inp, show=False, ask=ask) == []
     assert sum("Is this okay" in q for q in ask.asked) == MAX_TRIES
     _folder(inp, [GRID, np.delete(GRID, 4)], name="k")
-    rows = main_jumps("k", out, inp, show=False, ask=_answers("y", "q"))
+    rows = main_jumps("k", out, inp, JumpConfig(ask="count"), show=False,
+                      ask=_answers("y", "q"))
     assert len(rows) == 1 and len(_read(out, "k")) == 1                  # written so far
 
 
@@ -244,3 +246,77 @@ def test_false_line_in_the_preparation_is_excluded(dirs):
     assert len(params["preparations"][0]["initial_positions"]) == 12
     rec = _read(out)
     assert all(abs(float(r["mean_spacing_px"]) - 100) < 0.5 for r in rec)
+
+
+def test_doubtful_photo_is_asked_and_one_missing_line_is_not(dirs):
+    inp, out = dirs
+    half_gone = GRID[[0, 1, 2, 3, 10, 11]]                     # 6 of 12: coverage 50 %
+    _folder(inp, [GRID, np.delete(GRID, 5), GRID, half_gone, GRID])
+    ask = _answers("y", "y")                                    # preparation, then photo 4
+    rows = main_jumps("j", out, inp, show=False, ask=ask)
+    assert len(rows) == 5 and sum("Is this okay" in q for q in ask.asked) == 2
+    rec = _read(out)
+    assert rec[1]["quality"] == "ok" and rec[1]["n_missing"] == "1"
+    assert "lines found" in rec[3]["quality"]
+    assert all(abs(float(r["mean_spacing_px"]) - 100) < 0.5 for r in rec)
+    assert all(float(r["spacing_err_px"]) < 0.5 for r in rec)
+    assert (out / "jumps" / "j" / "overview.png").stat().st_size > 0
+
+
+def test_review_mode_asks_only_at_the_end(dirs):
+    inp, out = dirs
+    half_gone = GRID[[0, 1, 2, 3, 10, 11]]
+    _folder(inp, [GRID, half_gone, GRID])
+    ask = _answers("y", "x")                                    # prep; review: exclude photo 2
+    main_jumps("j", out, inp, JumpConfig(ask="review"), show=False, ask=ask)
+    assert ask.asked[1].startswith("y = keep, x = exclude")
+    rec = _read(out)
+    assert rec[1]["warning"] == "excluded in review" and rec[0]["warning"] == ""
+    assert _read(out, file="lines.csv")[1]["checked"] == "excluded"
+
+
+def test_template_from_the_preparation():
+    from line_analysis.jumps import make_template, matched
+    xs = 100 + 100 * np.arange(11)
+    p = _noisy_profile(xs, depth=0.3, noise=0.01)
+    t, half = make_template(p, list(xs + 2), 100)
+    assert np.isclose(np.linalg.norm(t), 1) and abs(t.mean()) < 1e-9 and half == 30
+    m = matched(_noisy_profile(xs + 7, depth=0.1, noise=0.02, seed=5), t)
+    peaks = [i for i in range(1, len(m) - 1) if m[i] > m[i - 1] and m[i] >= m[i + 1]
+             and m[i] > 0.5 * m.max()]
+    assert len(peaks) == 11 and np.allclose(peaks, xs + 7 + 2, atol=2)
+
+
+def test_grid_fit_hint_counts_steps_on_the_period():
+    from line_analysis.jumps import spacing_with_rule
+    xs = [100, 300, 500, 600, 800]                              # 4 of 7 every 100 px ... 
+    assert np.isclose(spacing_with_rule(xs, hint=100).spacing, 100)
+
+
+def test_weighted_fit_follows_the_precise_points():
+    from line_analysis.fits import fit_curve
+    x = np.arange(10.0)
+    y = 2 * x + 1
+    y[7] += 5                                                    # one bad point ...
+    sig = np.full(10, 0.1)
+    sig[7] = 10                                                  # ... with a large error bar
+    assert abs(fit_curve(x, y, "linear", sig).params[0] - 2) < 0.01
+    assert abs(fit_curve(x, y, "linear").params[0] - 2) > 0.1
+
+
+def test_bench_template_on_a_dark_series():
+    from dataclasses import replace
+    from line_analysis.bench import DEFAULT_SERIES, METHODS, run_bench
+    spec = replace(DEFAULT_SERIES[0], n=6)
+    res = run_bench([spec], {"t": METHODS["jumps template"]}, verbose=False)[0]
+    assert res["err_med"] < 1.0 and res["bad"] <= 1
+
+
+def test_a_big_hole_does_not_remove_good_lines():
+    from line_analysis.jumps import average_gap, spacing_with_rule
+    xs = [300, 400, 500, 600, 1300, 1400]                      # 6 lines lost in the middle
+    sp = spacing_with_rule(xs)
+    assert sp.lines == xs and not sp.excluded and sp.long_gaps == [(600, 1300)]
+    assert np.isclose(sp.spacing, 100) and sp.n_missing == 6
+    assert np.isclose(average_gap([100, 100, 100, 700, 100]), 100)
+    assert np.isclose(average_gap([98, 102, 100]), 100)

@@ -128,8 +128,8 @@ def build_parser():
     add_dirs(fol)
     add_detection_options(fol)
 
-    jmp = sub.add_parser("jumps", help="Lines from jumps in the collapsed contrast: prepare on "
-                                       "the first photo, then the middle 3 rows of every photo.")
+    jmp = sub.add_parser("jumps", help="Prepare on the first photo, then find the lines in "
+                                       "the middle 3 rows of every photo.")
     jmp.add_argument("path", help="measurement name (input/folder/NAME) or a folder of photos")
     jmp.add_argument("--contrast-diff", type=float, default=None,
                      help="jump that makes a line in the preparation, in noise sigmas of "
@@ -146,11 +146,20 @@ def build_parser():
     jmp.add_argument("--channels", choices=("auto", "mean", "r", "g", "b"), default="auto",
                      help="brightness from: auto = channels weighted by their brightness, "
                           "saturated ones left out (default); mean; or one channel")
+    jmp.add_argument("--detector", choices=("template", "threshold"), default="template",
+                     help="template: the line shape from the preparation, slid along the "
+                          "strip, with the whole row of lines predicted (default); threshold: "
+                          "the largest jump near each line")
+    jmp.add_argument("--ask", choices=("doubtful", "count", "review"), default="doubtful",
+                     help="doubtful: ask about photos with a bad quality score (default); "
+                          "count: ask when the line count changes; review: ask nothing during "
+                          "the run, then show the overview and every doubtful photo")
     jmp.add_argument("--no-track", action="store_true",
-                     help="search the whole strip of every photo instead of near the lines "
-                          "of the photo before")
-    jmp.add_argument("--window", type=float, default=0.2,
-                     help="tracking: search +- this fraction of the spacing (default 0.2)")
+                     help="threshold detector: search the whole strip of every photo instead "
+                          "of near the lines of the photo before")
+    jmp.add_argument("--window", type=float, default=None,
+                     help="search +- this fraction of the spacing around every line "
+                          "(default 0.15 template, 0.2 threshold)")
     jmp.add_argument("--min-sigma", type=float, default=2.0,
                      help="tracking: a line's jump must be over this many noise sigmas "
                           "(default 2)")
@@ -158,6 +167,11 @@ def build_parser():
                      help="do not ask: keep the first contrast_diff and every line count")
     jmp.add_argument("--no-show", action="store_true", help="do not open the image viewer")
     add_dirs(jmp)
+
+    bnc = sub.add_parser("bench", help="Score the detection methods on synthetic photos with "
+                                       "known lines.")
+    bnc.add_argument("--photos", type=int, default=24, help="photos per series (default 24)")
+    add_dirs(bnc, inputs=False)
 
     rep = sub.add_parser("report", help="Relate the folder results to the light-source ramp.")
     rep.add_argument("name", help="photo folder analysed with 'analysis folder'")
@@ -242,6 +256,10 @@ def run(args):
                     method="peaks" if args.peak_detection else "contrast",
                     contrast=None if args.contrast_threshold is None
                     else ContrastConfig(threshold=args.contrast_threshold))
+    elif args.command == "bench":
+        from dataclasses import replace
+        from .bench import DEFAULT_SERIES, run_bench
+        run_bench([replace(s, n=args.photos) for s in DEFAULT_SERIES])
     elif args.command == "jumps":
         from .jumps import JumpConfig, main_jumps
         main_jumps(args.path, args.output_dir, args.input_dir,
@@ -249,7 +267,7 @@ def run(args):
                               prep_rows=args.prep_rows, rows=args.rows,
                               jump_width=args.jump_width, channels=args.channels,
                               track=not args.no_track, window=args.window,
-                              min_sigma=args.min_sigma),
+                              min_sigma=args.min_sigma, detector=args.detector, ask=args.ask),
                    interactive=not args.yes, show=not args.no_show)
     elif args.command == "report":
         from .report import main_report

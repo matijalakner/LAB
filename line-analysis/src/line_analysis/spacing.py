@@ -59,7 +59,7 @@ def _first_guess(gaps):
     return float(np.median(full / k)) if len(full) else m
 
 
-def fit_grid(xs, extra_tol=EXTRA_TOL, iterations=10):
+def fit_grid(xs, extra_tol=EXTRA_TOL, iterations=10, hint=None):
     """Fit a regular grid to line positions -> GridFit, or None for < 2 lines.
 
     A missed line leaves a gap of two (or more) steps, and a false line falls
@@ -69,12 +69,14 @@ def fit_grid(xs, extra_tol=EXTRA_TOL, iterations=10):
     spacing from their grid position, or sharing it with a closer line, are
     extra. The spacing is then (last - first line) / (their grid numbers
     apart), which is the plain mean of the gaps when nothing is missed or extra.
+    ``hint``: a spacing to start from (e.g. the period of the pattern) instead
+    of the one guessed from the gaps.
     """
     xs = np.sort(np.asarray(xs, dtype=float))
     if len(xs) < 2:
         return None
     gaps = np.diff(xs)
-    d = _first_guess(gaps)
+    d = float(hint) if hint else _first_guess(gaps)
     if not d > 0:
         return None
     anchor = xs[np.argmin(np.abs(xs - np.median(xs)))]   # a real line near the middle

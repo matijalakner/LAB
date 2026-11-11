@@ -33,6 +33,7 @@ from .logs import LEVELS, companion, level_column, ramp_files, read_log, read_ra
 
 BASE_COLUMNS = ["time[s]", "step", "cycle", "direction"]
 RESULT_COLUMNS = ["mean_spacing_px", "std_spacing_px", "warning", "n_lines", "file"]
+OPTIONAL_COLUMNS = ["spacing_err_px", "quality"]     # from analysis jumps
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +185,8 @@ def acquire(ramp_csv, results_csv, camera_offset_s=0.0, liv=None, objective=None
                   f"(calibration.COEFF has {', '.join(sorted(COEFF))}); intensity axis left out")
 
     extra = [c for c in ("power[W]", "intensity[W/um2]") if c in table]
-    table = table[BASE_COLUMNS + [label] + extra + RESULT_COLUMNS]
+    optional = [c for c in OPTIONAL_COLUMNS if c in table]
+    table = table[BASE_COLUMNS + [label] + extra + RESULT_COLUMNS + optional]
     info = {"level": col, "level_label": label, "quantity": quantity, "unit": unit,
             "matched_by": matched_by, "power_source": power_source,
             "t0": t0, "ramp": ramp}
@@ -253,6 +255,12 @@ def plot_report(table, info, out_png, name="", objective="20x", theta="0.8wt",
         raise ValueError("every photo has a warning; nothing to plot.")
     ok["distance"] = ok["mean_spacing_px"].astype(float) * px_to_um
     ok["pitch"] = 2 * THETA[theta] * ok["distance"]
+    has_err = "spacing_err_px" in ok and pd.to_numeric(ok["spacing_err_px"],
+                                                         errors="coerce").notna().any()
+    if has_err:
+        err = pd.to_numeric(ok["spacing_err_px"], errors="coerce") * px_to_um
+        ok["distance_err"] = err
+        ok["pitch_err"] = 2 * THETA[theta] * err
     if "power[W]" in ok:
         ok["power[mW]"] = ok["power[W]"] * 1e3
 
@@ -274,13 +282,17 @@ def plot_report(table, info, out_png, name="", objective="20x", theta="0.8wt",
                 ax.scatter(inl[xcol], inl[ycol], s=30, color=color, marker=marker,
                            edgecolors="white", linewidths=1, label=f"ramp {direction}",
                            zorder=3)
+                if has_err:
+                    ax.errorbar(inl[xcol], inl[ycol], yerr=inl[f"{ycol}_err"].fillna(0),
+                                fmt="none", ecolor=color, elinewidth=1, alpha=0.6, zorder=2)
                 if len(exc):
                     ax.scatter(exc[xcol], exc[ycol], s=30, facecolors="none",
                                edgecolors=color, marker=marker, linewidths=1,
                                label=f"{direction}: left out of the fit", zorder=3)
                 if xcol == "time[s]" or fit == "none":
                     continue
-                f = fit_curve(inl[xcol], inl[ycol], fit)
+                f = fit_curve(inl[xcol], inl[ycol], fit,
+                              inl[f"{ycol}_err"] if has_err else None)
                 if f is None:
                     continue
                 xmean = float(np.nanmean(inl[xcol]))
