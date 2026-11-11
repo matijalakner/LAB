@@ -7,6 +7,7 @@ analysis image   IMAGE        lines of one photo
 analysis video   VIDEO -n N   lines in a frame every N seconds
 analysis spacing NAME         mean spacing (± std) against time of an analysed video
 analysis folder  NAME         every photo of a folder (settings tuned on the first)
+analysis jumps   NAME         every photo, lines from contrast jumps in the middle 3 rows
 analysis report  NAME         folder results against the DC2200 / pE-300 ramp
 ```
 
@@ -156,6 +157,33 @@ With `--track`, only the first photo is detected freely. Every later photo is se
 | `--contrast-steps F,F,...` | threshold factors tried in order when a line is missing |
 
 The tracking also writes `tracking.csv`: `photo, file, status` (`reference`, `ok`, `reported`, `failed`), `n_lines, widened, lowered, min_contrast_factor, missing_x, left_x, reference_x`. The tracking settings are stored in `parameters.json` under `tracking`. In Python: `main_folder("s1", tracking=TrackingConfig(x_tolerance=15))`.
+
+### `analysis jumps NAME`
+
+A separate method from `analysis folder`; it writes to `output/jumps/NAME/`.
+
+**Preparation** (on the first photo):
+1. The middle 300 rows are cut out (`--prep-rows`), and 200 px are cut off the left and the right (`--edge-crop`).
+2. The contrast of every pixel, `(I − background) / background` as in the contrast detection, is averaged over the rows: one value per x.
+3. The jump between neighbouring pixels, `c(x+1) − c(x)`, is computed. Every positive jump larger than `contrast_diff` is a line; within 10 px only the largest counts.
+4. The whole photo opens with every line drawn in navy blue from top to bottom. Answer `y` to keep it, `n` and then `+` (more lines: lower `contrast_diff`), `-` (fewer lines: raise it) or a number, or `q` to stop. After 15 tries it stops by itself. The kept `contrast_diff` and the lines (the initial positions) go to `parameters.json`.
+
+`contrast_diff` starts at `--contrast-diff`, or else at 6 noise sigmas of the jumps of the 3-row strip, because the same value is used there.
+
+**Analysis** (every photo, the first included, in time order): the middle row and the rows above and below it (`--rows 3`), without the edges, are collapsed and searched for jumps the same way. When a photo has a different number of lines than the photo before it (the first photo: than the preparation), its marked photo opens: `y` continues with the new count, `n` runs the preparation again on this photo and analyses it again with the new value, `q` stops and writes what was done. `--yes` asks nothing.
+
+```text
+output/jumps/<name>/
+├── results.csv          as in analysis folder (spacing from the grid fit, n_missing, n_extra)
+├── lines.csv            photo, file, n_lines, contrast_diff, checked (accepted / prepared again), x_px
+├── parameters.json      settings and every preparation (photo, contrast_diff, initial positions)
+├── preparation/         try<N>_<photo>.jpg of every preparation try
+└── <photo>_marked.jpg   the whole photo, lines in navy blue
+```
+
+x positions are those of the whole photo. For the report: `analysis report NAME --results output/jumps/NAME/results.csv`.
+
+Three rows give a noisy profile: on dark photos, where the lines are only a few brightness levels deep, the noise jumps can be as large as those of the lines. The preparation shows how many lines the 3-row strip gives with each value; `--rows 20` or more helps on such photos.
 
 ### `analysis report NAME`
 

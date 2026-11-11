@@ -128,6 +128,23 @@ def build_parser():
     add_dirs(fol)
     add_detection_options(fol)
 
+    jmp = sub.add_parser("jumps", help="Lines from jumps in the collapsed contrast: prepare on "
+                                       "the first photo, then the middle 3 rows of every photo.")
+    jmp.add_argument("path", help="measurement name (input/folder/NAME) or a folder of photos")
+    jmp.add_argument("--contrast-diff", type=float, default=None,
+                     help="jump of the collapsed contrast between neighbouring pixels that "
+                          "makes a line (default: suggested from the first photo)")
+    jmp.add_argument("--edge-crop", type=int, default=200, metavar="PX",
+                     help="px cut off the left and the right (default 200)")
+    jmp.add_argument("--prep-rows", type=int, default=300,
+                     help="rows of the preparation strip (default 300)")
+    jmp.add_argument("--rows", type=int, default=3,
+                     help="rows of the analysis strip around the middle row (default 3)")
+    jmp.add_argument("--yes", action="store_true",
+                     help="do not ask: keep the first contrast_diff and every line count")
+    jmp.add_argument("--no-show", action="store_true", help="do not open the image viewer")
+    add_dirs(jmp)
+
     rep = sub.add_parser("report", help="Relate the folder results to the light-source ramp.")
     rep.add_argument("name", help="photo folder analysed with 'analysis folder'")
     rep.add_argument("--ramp", default=None,
@@ -211,6 +228,12 @@ def run(args):
                     method="peaks" if args.peak_detection else "contrast",
                     contrast=None if args.contrast_threshold is None
                     else ContrastConfig(threshold=args.contrast_threshold))
+    elif args.command == "jumps":
+        from .jumps import JumpConfig, main_jumps
+        main_jumps(args.path, args.output_dir, args.input_dir,
+                   JumpConfig(contrast_diff=args.contrast_diff, edge=args.edge_crop,
+                              prep_rows=args.prep_rows, rows=args.rows),
+                   interactive=not args.yes, show=not args.no_show)
     elif args.command == "report":
         from .report import main_report
         out = main_report(args.name, args.ramp, args.results, args.output_dir,
