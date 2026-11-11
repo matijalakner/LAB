@@ -94,7 +94,7 @@ def test_folder_tracking_follows_drift_and_reports(dirs):
         t = 1_700_000_000 + i
         os.utime(folder / f"tr_{i:04d}.png", (t, t))
 
-    rows = main_folder("tr", out, inp, interactive=False, show=False,
+    rows = main_folder("tr", out, inp, interactive=False, show=False, edge=0,
                        tracking=TrackingConfig(x_tolerance=10))
     with open(out / "folder" / "tr" / "tracking.csv") as f:
         trk = list(csv.DictReader(f))

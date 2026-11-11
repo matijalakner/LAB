@@ -8,13 +8,25 @@ from PIL import Image
 from .detect import DetectionConfig, detect_lines, mark_image, plot_line_signal
 
 
-def load_image(path, middle=None):
+EDGE_CROP = 100   # px cut off the left and the right edge before the analysis
+
+
+def load_image(path, middle=None, edge=0):
     """An image file as an 8-bit RGB array (H x W x 3).
 
     ``middle`` keeps only that many rows around the middle of the photo, and a
-    photo with fewer rows raises ValueError. See _read_image for the formats.
+    photo with fewer rows raises ValueError. ``edge`` cuts that many columns off
+    the left and the right side (dark, vignetted edges), so x positions in the
+    result are ``edge`` px smaller than in the photo; a photo narrower than
+    2 * edge + 100 px raises ValueError. See _read_image for the formats.
     """
     img = _read_image(path)
+    if edge:
+        width = img.shape[1]
+        if width < 2 * edge + 100:
+            raise ValueError(f"photo is only {width} px wide; cannot cut {edge} px "
+                             "off each side (use a smaller edge crop)")
+        img = img[:, edge:width - edge]
     if middle is None:
         return img
     height = img.shape[0]
@@ -52,7 +64,7 @@ def _read_image(path):
 
 
 def analyse_image(image_path, out_dir, config=None, plot=False, write_csv=True,
-                  save_marked=True, middle=None):
+                  save_marked=True, middle=None, edge=0):
     """Detect the vertical lines in one image file and save the results.
 
     Writes into ``out_dir`` (created if needed):
@@ -60,13 +72,15 @@ def analyse_image(image_path, out_dir, config=None, plot=False, write_csv=True,
         <name>_lines.csv    line, x_px, spacing_px      (write_csv=True)
         <name>_signal.png   line-strength plot          (plot=True)
 
-    ``middle`` analyses and writes only that many rows around the middle.
+    ``middle`` analyses and writes only that many rows around the middle;
+    ``edge`` cuts that many px off the left and right first (see load_image),
+    so the marked image and the x positions are those of the cut image.
 
     Returns a dict with the line positions and the written paths.
     """
     config = config or DetectionConfig()
     image_path, out_dir = Path(image_path), Path(out_dir)
-    img = load_image(image_path, middle)
+    img = load_image(image_path, middle, edge)
     out_dir.mkdir(parents=True, exist_ok=True)
     height, width = img.shape[:2]
     xs, sig, threshold = detect_lines(img, config)
@@ -74,7 +88,8 @@ def analyse_image(image_path, out_dir, config=None, plot=False, write_csv=True,
     name = image_path.stem
     marked_path = out_dir / f"{name}_marked.png"
     result = {"name": name, "width": width, "height": height, "lines": xs,
-              "threshold": threshold, "marked_path": str(marked_path)}
+              "threshold": threshold, "marked_path": str(marked_path),
+              "edge_crop": edge}
     if save_marked:
         # compress_level=1: ~3x faster than the default for a file only 5 % bigger
         Image.fromarray(mark_image(img, xs, config.half_width)).save(marked_path,

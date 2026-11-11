@@ -77,12 +77,12 @@ Paths below are inside the [data folder](#where-the-data-is) (`LAB/data`): `inpu
 
 ### `analysis image IMAGE`
 
-`IMAGE` is a path, or a file name like `mysample_0003.jpg`, which is looked up in `input/folder/mysample/`. With `--plot` it also writes the line-strength plot. The [detection options](#detection-parameters) apply.
+`IMAGE` is a path, or a file name like `mysample_0003.jpg`, which is looked up in `input/folder/mysample/`. 100 px are cut off the left and the right edge first (`--edge-crop PX`, 0 = full width), as in the folder analysis. With `--plot` it also writes the line-strength plot. The [detection options](#detection-parameters) apply.
 
 ```text
 output/image/<name>/
-├── <name>_marked.png     the image, same size, lines painted red
-├── <name>_lines.csv      line, x_px, spacing_px
+├── <name>_marked.png     the image without the cut edges, lines painted red
+├── <name>_lines.csv      line, x_px (from the cut edge), spacing_px
 └── <name>_signal.png     line-strength plot (only with --plot)
 ```
 
@@ -109,7 +109,7 @@ This command reads `output/video/<name>/lines.csv`. It writes `spacing.csv` (`ti
 `NAME` is the measurement name (`input/folder/NAME`) or any folder of photos. Videos in the folder are ignored.
 
 1. The photos are sorted by capture time. The time comes from the equipment capture or photo log when the photo is listed there (`log`), else from EXIF (`exif`), else from the file (`file`).
-2. The middle 300 rows of every photo are cut out.
+2. The middle 300 rows of every photo are cut out, and 100 px are cut off the left and the right edge (`--edge-crop PX`; 0 keeps the full width). The edges are often dark or vignetted and give false lines there. The cut applies to every method (contrast, peak detection, tracking, `--full-image`). Line x positions (marked photos, `tracking.csv`, `defects_x`) are measured from the cut, so add the edge crop to get the x in the photo; the spacing is not affected. A line within a few px of the cut can come and go between photos.
 3. The lines are found from the contrast of the strip, as below. There is no tuning and nothing to confirm.
 
 **Contrast detection.** Every pixel gets a contrast `(I - background) / background`, with `I` the mean of R, G and B and the background a moving median along x. Averaging over y gives one contrast value per x. Where `|contrast|` exceeds `--contrast-threshold` (default 0.025) there is a feature. A bright peak followed by a dark dip is a line at the zero crossing between them; anything else is one-sided and placed at its largest extremum. Dust and defects do not move: one-sided features at the same x in 3 of 6 evenly spread photos, and visible there in all 6, are not counted as lines, and their positions are in `parameters.json` under `defects_x`. If such features are more than half of all features, the lines themselves are not moving and nothing is removed.
@@ -121,7 +121,7 @@ output/folder/<name>/
 ├── results.csv       time_stamp, photo, file, mean_spacing_px, n_lines, std_spacing_px, warning, time_source
 ├── parameters.json   the settings used
 ├── tuning/           every tuning attempt
-└── <photo>_marked.png   the middle 300 px at the full width, lines painted red
+└── <photo>_marked.png   the middle 300 px without the cut edges, lines painted red
 ```
 
 A photo with fewer than 300 rows gets a `failed` warning.

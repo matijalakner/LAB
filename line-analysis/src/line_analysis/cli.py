@@ -69,6 +69,10 @@ def build_parser():
     sub = p.add_subparsers(dest="command", required=True)
 
     img = sub.add_parser("image", help="Detect the lines in one photo.")
+    img.add_argument("--edge-crop", type=int, default=100, metavar="PX",
+                     help="px cut off the left and the right edge of the photo before the analysis "
+                          "(default 100; 0 = full width). Line x positions are then measured "
+                          "from the cut")
     img.add_argument("image", help="image file, or a name like mysample_0003.jpg")
     img.add_argument("--plot", action="store_true", help="also save the line-strength plot")
     add_dirs(img)
@@ -100,6 +104,10 @@ def build_parser():
     fol.add_argument("--no-show", action="store_true", help="do not open the image viewer")
     fol.add_argument("--window", type=int, default=7,
                      help="neighbouring photos compared for the warnings (default 7)")
+    fol.add_argument("--edge-crop", type=int, default=100, metavar="PX",
+                     help="px cut off the left and the right edge of every photo before the analysis "
+                          "(default 100; 0 = full width). Line x positions are then measured "
+                          "from the cut")
     fol.add_argument("--full-image", action="store_true",
                      help="analyse the whole photos instead of their middle 300 px; "
                           "writes to <output-dir>/folder/NAME/full_image/")
@@ -169,7 +177,7 @@ def run(args):
         from pathlib import Path
         path = resolve_media(args.image, args.input_dir)
         res = analyse_image(path, Path(args.output_dir) / "image" / path.stem,
-                            config_from_args(args), plot=args.plot)
+                            config_from_args(args), plot=args.plot, edge=args.edge_crop)
         print(f"{len(res['lines'])} lines in {path.name}")
         for key in ("marked_path", "csv_path", "plot_path"):
             if key in res:
@@ -199,7 +207,7 @@ def run(args):
         main_folder(args.path, args.output_dir, args.input_dir, window=args.window,
                     interactive=not args.yes, show=not args.no_show,
                     config=config_from_args(args), tracking=tracking,
-                    middle_strips=not args.full_image,
+                    middle_strips=not args.full_image, edge=args.edge_crop,
                     method="peaks" if args.peak_detection else "contrast",
                     contrast=None if args.contrast_threshold is None
                     else ContrastConfig(threshold=args.contrast_threshold))

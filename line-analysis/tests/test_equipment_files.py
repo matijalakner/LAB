@@ -55,7 +55,7 @@ def test_pe300_ramp_photo_log_power_report(dirs):
     # an older ramp without photos must not be picked
     make_ramp(out, "ramp_20261101T000000Z", "current_A", [0, 0.1], stamp="2026-11-01T00:00:00Z")
 
-    res = main_folder("s1", out, inp, interactive=False, show=False)
+    res = main_folder("s1", out, inp, interactive=False, show=False, edge=0)
     assert len(res) == len(seq)
     rec = results(out, "s1")
     assert {r["time_source"] for r in rec} == {"log"}
@@ -101,7 +101,7 @@ def test_liv_curve_gives_the_power_axis(dirs):
                     ["time_s", "cycle", "direction", "intensity_pct", "power_W"],
                     [(i, 1, "up", x, x * 2e-5) for i, x in enumerate(range(0, 101, 10))],
                     stamp=None)
-    main_folder("s3", out, inp, interactive=False, show=False)
+    main_folder("s3", out, inp, interactive=False, show=False, edge=0)
     rep = main_report("s3", output_dir=out, liv=liv)
     assert rep["power_source"].startswith("LIV")
     assert np.allclose(rep["table"]["power[W]"], rep["table"]["intensity[%]"] * 2e-5)
@@ -111,7 +111,7 @@ def test_pe300_color_calibration_gives_the_power(dirs):
     inp, out = dirs
     seq = make_ramp(out, "r", "intensity_pct", [0, 50, 100])
     make_photos(inp, out, "r", "s5", seq, "intensity_pct")
-    main_folder("s5", out, inp, interactive=False, show=False)
+    main_folder("s5", out, inp, interactive=False, show=False, edge=0)
     rep = main_report("s5", output_dir=out, color="green")
     assert rep["power_source"].startswith("pE-300 green")
     assert np.allclose(rep["table"]["power[W]"],
@@ -129,7 +129,7 @@ def test_report_needs_photos_of_the_ramp(dirs):
     make_photos(inp, out, "other", "s4", seq, "current_A", with_log=False)
     write_log(out / "camera" / "camera_1.csv", ["time_s", "index", "file", "utc"],
               [(0, 0, "s4_0000.jpg", STAMP), (1, 1, "s4_0001.jpg", STAMP)])
-    main_folder("s4", out, inp, interactive=False, show=False)
+    main_folder("s4", out, inp, interactive=False, show=False, edge=0)
     with pytest.raises(ValueError, match="No photo"):
         main_report("s4", output_dir=out)
 
@@ -191,7 +191,7 @@ def test_folder_saves_the_middle_strips_of_evenly_spread_photos(dirs):
     inp, out = dirs
     for i in range(12):
         save_photo(inp / "folder" / "st" / f"st_{i:04d}.png", 80, height=301, seed=i)
-    main_folder("st", out, inp, interactive=False, show=False, middle_strips=False)
+    main_folder("st", out, inp, interactive=False, show=False, edge=0, middle_strips=False)
     strips = sorted((out / "folder" / "st" / "full_image" / "strips").iterdir())
     assert [p.name for p in strips] == [f"st_{i:04d}_strip.png" for i in (0, 1, 4, 6, 9, 11)]
     source = np.asarray(Image.open(inp / "folder" / "st" / "st_0006.png").convert("RGB"))
@@ -203,7 +203,7 @@ def test_middle_strips_are_300_px_with_the_lines_marked(dirs, track):
     inp, out = dirs
     for i in range(4):
         save_photo(inp / "folder" / "m" / f"m_{i:04d}.png", 80, height=701, seed=i)
-    rows = main_folder("m", out, inp, interactive=False, show=False, tracking=track or None)
+    rows = main_folder("m", out, inp, interactive=False, show=False, edge=0, tracking=track or None)
     target = out / "folder" / "m"
     assert [r[4] for r in rows] == [8] * 4 and all(r[6] == "" for r in rows)
     assert len(results(out, "m")) == 4
@@ -221,7 +221,7 @@ def test_middle_strips_warn_about_a_photo_that_is_too_low(dirs):
     inp, out = dirs
     for i, h in enumerate((400, 400, 200, 400)):
         save_photo(inp / "folder" / "low" / f"low_{i}.png", 80, height=h, seed=i)
-    rows = main_folder("low", out, inp, interactive=False, show=False)
+    rows = main_folder("low", out, inp, interactive=False, show=False, edge=0)
     assert "failed: photo has only 200 rows" in rows[2][6]
 
 
@@ -229,7 +229,7 @@ def test_full_image_mode_keeps_the_marked_photos_at_full_size(dirs):
     inp, out = dirs
     for i in range(3):
         save_photo(inp / "folder" / "f" / f"f_{i}.png", 80, height=701, seed=i)
-    main_folder("f", out, inp, interactive=False, show=False, middle_strips=False)
+    main_folder("f", out, inp, interactive=False, show=False, edge=0, middle_strips=False)
     marked = Image.open(out / "folder" / "f" / "full_image" / "f_1_marked.png")
     assert marked.size == (800, 701)
     assert not (out / "folder" / "f" / "results.csv").exists()
@@ -254,7 +254,7 @@ def test_contrast_finds_the_zero_crossings_and_ignores_fixed_defects(dirs):
         path = inp / "folder" / "w" / f"w_{i:02d}.png"
         path.parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray(walls(xs, defects=[300, 5300], seed=i)).save(path)
-    rows = main_folder("w", out, inp, interactive=False, show=False)
+    rows = main_folder("w", out, inp, interactive=False, show=False, edge=0)
     assert [r[4] for r in rows] == [6] * 10
     assert all(abs(r[3] - 650) < 2 for r in rows)
     params = json.loads((out / "folder" / "w" / "parameters.json").read_text())
@@ -263,3 +263,44 @@ def test_contrast_finds_the_zero_crossings_and_ignores_fixed_defects(dirs):
     marked = np.asarray(Image.open(out / "folder" / "w" / "w_00_marked.png"))
     assert marked.shape[:2] == (300, 6000)
     assert marked[0, 600].tolist() == [255, 0, 0] or marked[0, 599].tolist() == [255, 0, 0]
+
+
+def test_edge_crop_cuts_100_px_off_each_side(dirs, tmp_path):
+    from line_analysis.image import EDGE_CROP, analyse_image, load_image
+    from conftest import save_photo
+    inp, out = dirs
+    path = inp / "e.jpg"
+    xs = save_photo(path, 100, n=10, width=1200, offset=50)        # lines at 50, 150, ... 950
+    assert EDGE_CROP == 100
+    full, cut = load_image(path), load_image(path, edge=100)
+    assert cut.shape[1] == full.shape[1] - 200
+    assert np.array_equal(cut, full[:, 100:-100])
+    assert load_image(path, middle=100, edge=100).shape[:2] == (100, 1000)
+    with pytest.raises(ValueError, match="cannot cut"):
+        load_image(path, edge=560)
+
+    res = analyse_image(path, tmp_path / "o", edge=100)
+    assert res["edge_crop"] == 100 and res["width"] == 1000
+    lines = np.array(res["lines"])
+    assert len(lines) == 9                                           # the line at x=50 is cut off
+    assert np.allclose(lines + 100, xs[1:], atol=2)                  # x measured from the cut
+    assert np.allclose(np.diff(lines), 100, atol=2)
+
+
+@pytest.mark.parametrize("method", ["contrast", "peaks"])
+def test_folder_cuts_the_edges_by_default(dirs, method):
+    from conftest import save_photo
+    inp, out = dirs
+    for k in range(4):
+        # lines at 30 and 1170, inside the cut edges, would fake a wider spacing
+        save_photo(inp / "folder" / "ed" / f"ed_{k:04d}.jpg", 95, n=13, width=1200, offset=30,
+                   seed=k)
+    rows = main_folder("ed", out, inp, interactive=False, show=False,
+                       method=method, config=None)
+    rec = results(out, "ed")
+    assert len(rows) == 4 and all(r["warning"] == "" for r in rec)
+    assert all(abs(float(r["mean_spacing_px"]) - 95) < 1.5 for r in rec)
+    params = json.loads((out / "folder" / "ed" / "parameters.json").read_text())
+    assert params["edge_crop"] == 100
+    marked = Image.open(out / "folder" / "ed" / "ed_0000_marked.png")
+    assert marked.size[0] == 1000
