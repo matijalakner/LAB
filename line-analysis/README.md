@@ -173,17 +173,18 @@ A separate method from `analysis folder`; it writes to `output/jumps/NAME/`.
 **Analysis** (every photo, the first included, in time order): the middle row and the rows above and below it (`--rows 3`), without the edges, are collapsed the same way.
 - **Tracking** (default; `--no-track` searches the whole strip): every line is searched only within ±20 % of the spacing (`--window`) around its position in the photo before (the first photo: the preparation). Its largest jump there is taken if it is over `--min-sigma` (2) noise sigmas and over 35 % of the typical jump of the lines of this photo. Noise between the lines cannot become a line, and in a bright photo an empty window is not filled with a noise peak. A line not found keeps its old position for the next photo. New lines are searched beyond the outermost lines (where lines come into the picture) at `contrast_diff` sigmas.
 - When a photo has a different number of lines than the photo before it, its marked photo opens: `y` continues with the new count, `n` runs the preparation again on this photo and analyses it again, `q` stops and writes what was done. `--yes` asks nothing.
+- **Gap rule** (also in the preparation): a distance between neighbouring lines below ½ of the average distance means a false line; of its two lines, the one whose removal leaves the distances closest to the typical (median) one is excluded, until no such distance is left. A distance over 2× the average (lines lost) is left out: the lines are split there. The spacing is then the grid fit of the parts together (their lengths / their grid steps), so a missed line with a distance of only 1.9× is handled too. Excluded lines are drawn dotted red, are not followed in the next photo, and count in `n_extra`; the lines lost in long distances count in `n_missing`.
 - **Cross-check**: the period of the collapsed contrast, from its autocorrelation (no lines needed), is compared with the spacing. `lines.csv` has both, and a difference over 5 % is printed.
 
 ```text
 output/jumps/<name>/
 ├── results.csv          as in analysis folder (spacing from the grid fit, n_missing, n_extra)
 ├── lines.csv            photo, file, n_lines, contrast_diff, checked (accepted / prepared again),
-│                        period_px, period_vs_spacing_pct, x_px
+│                        period_px, period_vs_spacing_pct, x_px, excluded_x, long_gaps
 ├── parameters.json      settings and every preparation (photo, contrast_diff, channel weights,
 │                        initial positions)
 ├── preparation/         try<N>_<photo>.jpg of every preparation try
-└── <photo>_marked.jpg   the whole photo, lines in navy blue
+└── <photo>_marked.jpg   the whole photo, lines in navy blue, excluded lines dotted red
 ```
 
 x positions are those of the whole photo. For the report: `analysis report NAME --results output/jumps/NAME/results.csv`.

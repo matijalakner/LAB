@@ -37,9 +37,15 @@ Analysis (every photo, in time order, the first included):
   lines needed) is compared with the spacing; lines.csv has both, and a
   difference over 5 % is printed.
 
-x positions are those of the whole photo (the cut edge added back). The spacing
-of every photo comes from the grid fit (spacing.fit_grid), as in the folder
-analysis.
+Gap rule (every photo, and the preparation): a distance between neighbouring
+lines below half the average distance means a false line: of its two lines the
+one whose removal leaves the distances closest to the typical (median) one is excluded,
+until no such distance is left. A distance over twice the average (lines
+lost) is left out: the lines are split there. The spacing is then the grid fit
+(spacing.fit_grid) of every part, together: (sum of their lengths) / (sum of
+their grid steps). Excluded lines are not used as positions for the next photo.
+
+x positions are those of the whole photo (the cut edge added back).
 """
 import json
 from dataclasses import asdict, dataclass
@@ -55,6 +61,8 @@ from .spacing import fit_grid
 from .utils import write_csv
 
 NAVY = (0, 0, 128)
+EXCLUDED = (220, 30, 30)       # dotted: lines excluded by the gap rule
+GAP_LOW, GAP_HIGH = 0.5, 2.0   # distances outside this many times the average are excluded
 MAX_TRIES = 15
 START_SIGMAS = 6.0
 SATURATED = 250
@@ -166,6 +174,76 @@ def find_jumps(profile, limit, merge=10, width=4, lo=None, hi=None):
     return [k + off + _refine(d, k) for k in sorted(taken)]
 
 
+@dataclass
+class Spacing:
+    """The spacing of one photo after the gap rule."""
+    lines: list                   # lines kept
+    excluded: list                # lines excluded (too close to a neighbour)
+    long_gaps: list               # (x_left, x_right) of distances over GAP_HIGH x the average
+    spacing: float = None
+    std: float = float("nan")
+    n_missing: int = 0            # missed lines: inside the parts (grid fit) and in long gaps
+    n_extra: int = 0              # excluded lines + lines the grid fit put off the grid
+
+
+def gap_rule(xs, low=GAP_LOW, high=GAP_HIGH):
+    """(kept lines, excluded lines, parts): the gap rule, see the module doc."""
+    xs = sorted(float(x) for x in xs)
+    excluded = []
+    while len(xs) >= 3:
+        gaps = np.diff(xs)
+        avg = gaps.mean()
+        i = int(np.argmin(gaps))
+        if gaps[i] >= low * avg:
+            break
+
+        typical = float(np.median(gaps))   # not pulled by the short distance itself
+
+        def score(j):                      # distance closest to typical after removing xs[j]
+            if 0 < j < len(xs) - 1:
+                return abs(xs[j + 1] - xs[j - 1] - typical)
+            other = xs[2] - xs[1] if j == 0 else xs[-2] - xs[-3]
+            return abs(other - typical)
+        j = i if score(i) <= score(i + 1) else i + 1
+        excluded.append(xs.pop(j))
+    parts = [xs[:1]] if xs else []
+    if len(xs) >= 2:
+        avg = float(np.mean(np.diff(xs)))
+        for a, b in zip(xs, xs[1:]):
+            if b - a > high * avg:
+                parts.append([b])
+            else:
+                parts[-1].append(b)
+    return xs, sorted(excluded), parts
+
+
+def spacing_with_rule(xs, low=GAP_LOW, high=GAP_HIGH):
+    """Spacing (grid fit of the parts between long gaps) -> Spacing."""
+    kept, excluded, parts = gap_rule(xs, low, high)
+    res = Spacing(kept, excluded, [(p[-1], q[0]) for p, q in zip(parts, parts[1:])])
+    span = steps = 0.0
+    single, extra, missing = [], 0, 0
+    for part in parts:
+        fit = fit_grid(part)
+        if fit is None or len(fit.lines) < 2:
+            continue
+        n = fit.index[-1] - fit.index[0]
+        if n <= 0:
+            continue
+        span += fit.lines[-1] - fit.lines[0]
+        steps += n
+        idx = np.asarray(fit.index)
+        single += list(np.diff(fit.lines)[np.diff(idx) == 1])
+        extra += len(fit.extra)
+        missing += len(fit.missing)
+    if steps:
+        res.spacing = span / steps
+        res.std = float(np.std(single, ddof=1)) if len(single) > 1 else float("nan")
+        missing += sum(max(0, int(round((b - a) / res.spacing)) - 1) for a, b in res.long_gaps)
+    res.n_missing, res.n_extra = missing, len(excluded) + extra
+    return res
+
+
 def _spacing_of(xs):
     fit = fit_grid(xs)
     if fit is not None:
@@ -241,22 +319,34 @@ def mark_navy(img, xs, width=None):
     return marked
 
 
-def save_marked(img, xs, path):
+def save_marked(img, xs, path, excluded=()):
+    """The marked photo (navy lines; ``excluded`` lines dotted red) as JPEG."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(mark_navy(img, xs)).save(path, quality=92)
+    marked = mark_navy(img, xs)
+    w = marked.shape[1]
+    half = max(3, w // 1000) // 2
+    for x in excluded:
+        x = int(round(x))
+        for r0 in range(0, marked.shape[0], 16):           # dashes, 8 px on, 8 px off
+            marked[r0:r0 + 8, max(0, x - half):min(w, x + half + 1)] = EXCLUDED
+    Image.fromarray(marked).save(path, quality=92)
     return path
 
 
-def _describe(xs):
-    fit = fit_grid(xs)
-    text = f"{len(xs)} lines"
-    if fit is not None:
-        text += f", spacing {fit.spacing:.1f} px"
-        if fit.missing:
-            text += f", {len(fit.missing)} missed"
-        if fit.extra:
-            text += f", {len(fit.extra)} extra"
+def _describe(sp):
+    """Text for a Spacing (or a list of lines, which gets the gap rule first)."""
+    if not isinstance(sp, Spacing):
+        sp = spacing_with_rule(sp)
+    text = f"{len(sp.lines)} lines"
+    if sp.spacing is not None:
+        text += f", spacing {sp.spacing:.1f} px"
+    if sp.excluded:
+        text += f", {len(sp.excluded)} excluded (too close)"
+    if sp.long_gaps:
+        text += f", {len(sp.long_gaps)} distance(s) over {GAP_HIGH:g}x left out"
+    if sp.n_missing:
+        text += f", {sp.n_missing} missed"
     return text
 
 
@@ -333,17 +423,21 @@ def prepare(photo, img, an, out_dir, interactive=True, show=True, ask=input):
     low = high = None
     prep_dir = Path(out_dir) / "preparation"
     for attempt in range(1, MAX_TRIES + 1):
-        lines, sigma = an.prep_lines(img, value)
+        found, sigma = an.prep_lines(img, value)
+        sp = spacing_with_rule(found)
+        lines = sp.lines
         an.value = value
         if not interactive:
             return lines
         thin, _, _ = an.lines(img, lines)
-        path = save_marked(img, lines, prep_dir / f"try{attempt}_{Path(photo).stem}.jpg")
+        path = save_marked(img, lines, prep_dir / f"try{attempt}_{Path(photo).stem}.jpg",
+                           sp.excluded)
         print(f"\nPreparation, try {attempt} of {MAX_TRIES} on {Path(photo).name}: "
-              f"contrast_diff {value:.3g} sigma (= {value * sigma:.4g}) -> {_describe(lines)}")
+              f"contrast_diff {value:.3g} sigma (= {value * sigma:.4g}) -> {_describe(sp)}")
         print("  channels R, G, B weighted " + ", ".join(f"{w:.2f}" for w in an.weights))
         print("  x = " + ", ".join(f"{x:.0f}" for x in lines))
-        print(f"  (the {cfg.rows}-row analysis strip of this photo then finds {len(thin)} lines)")
+        print(f"  (the {cfg.rows}-row analysis strip of this photo then finds "
+              f"{len(spacing_with_rule(thin).lines)} lines)")
         print(f"  marked photo: {path}")
         if show and not _show_image(path):
             print("  (could not open an image viewer - open the file above yourself)")
@@ -381,7 +475,19 @@ def prepare(photo, img, an, out_dir, interactive=True, show=True, ask=input):
 
 
 LINES_HEADER = ["photo", "file", "n_lines", "contrast_diff", "checked", "period_px",
-                "period_vs_spacing_pct", "x_px"]
+                "period_vs_spacing_pct", "x_px", "excluded_x", "long_gaps"]
+
+
+def _row(time_info, n, name, sp, warning=""):
+    """results.csv row (folder.RESULTS_HEADER) from a Spacing."""
+    mean = std = ""
+    if sp.spacing is None:
+        warning = "; ".join(w for w in (warning, "fewer than 2 lines") if w)
+    else:
+        mean = round(sp.spacing, 3)
+        std = "" if np.isnan(sp.std) else round(sp.std, 3)
+    return (time_info[0], n, name, mean, len(sp.lines), std, warning, time_info[1],
+            sp.n_missing, sp.n_extra)
 
 
 def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=True,
@@ -441,10 +547,12 @@ def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=T
         checked, per, diff = "", None, None
         try:
             img = img if n == 1 else _read_image(photo)
-            lines, nxt, per = an.lines(img, reference)
-            while interactive and len(lines) != previous:
-                marked = save_marked(img, lines, out_dir / f"{photo.stem}_marked.jpg")
-                print(f"\n[{n}/{len(photos)}] {photo.name}: {_describe(lines)}, "
+            found, nxt, per = an.lines(img, reference)
+            sp = spacing_with_rule(found)
+            while interactive and len(sp.lines) != previous:
+                marked = save_marked(img, sp.lines, out_dir / f"{photo.stem}_marked.jpg",
+                                     sp.excluded)
+                print(f"\n[{n}/{len(photos)}] {photo.name}: {_describe(sp)}, "
                       f"the photo before had {previous}")
                 print(f"  marked photo: {marked}")
                 if show and not _show_image(marked):
@@ -467,24 +575,28 @@ def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=T
                 note_preparation(photo, again)
                 previous, reference = len(again), again
                 checked = "prepared again"
-                lines, nxt, per = an.lines(img, reference)
-            save_marked(img, lines, out_dir / f"{photo.stem}_marked.jpg")
-            row = result_row(times[photo], n, photo.name, lines)
-            previous, reference = len(lines), nxt
-            spacing = _spacing_of(lines)
-            if per and spacing:
-                diff = 100 * (per / spacing - 1)
+                found, nxt, per = an.lines(img, reference)
+                sp = spacing_with_rule(found)
+            save_marked(img, sp.lines, out_dir / f"{photo.stem}_marked.jpg", sp.excluded)
+            row = _row(times[photo], n, photo.name, sp)
+            previous = len(sp.lines)
+            drop = set(sp.excluded)
+            reference = [x for x in nxt if x not in drop]          # excluded: not followed
+            if per and sp.spacing:
+                diff = 100 * (per / sp.spacing - 1)
         except Exception as e:
-            lines = []
+            sp = Spacing([], [], [])
             row = result_row(times[photo], n, photo.name, None, f"failed: {e}")
         rows.append(row)
-        line_rows.append((n, photo.name, len(lines), round(an.value, 4), checked,
+        line_rows.append((n, photo.name, len(sp.lines), round(an.value, 4), checked,
                           "" if per is None else round(per, 2),
                           "" if diff is None else round(diff, 1),
-                          " ".join(f"{x:.1f}" for x in lines)))
+                          " ".join(f"{x:.1f}" for x in sp.lines),
+                          " ".join(f"{x:.1f}" for x in sp.excluded),
+                          " ".join(f"{a:.0f}-{b:.0f}" for a, b in sp.long_gaps)))
         flag = (f"; period {per:.1f} px differs by {diff:+.0f} %"
                 if diff is not None and abs(diff) > 100 * PERIOD_TOL else "")
-        print(f"[{n}/{len(photos)}] {photo.name}: {_describe(lines)}"
+        print(f"[{n}/{len(photos)}] {photo.name}: {_describe(sp)}"
               + (f" ({checked})" if checked else "") + (f" {row[6]}" if row[6] else "") + flag)
     return _finish(rows, write(rows, line_rows))
 

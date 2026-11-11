@@ -204,3 +204,43 @@ def test_sizes_scale_with_the_width():
     assert an.sizes(np.zeros((1, 6000, 3))) == (16, 25)
     assert an.sizes(np.zeros((1, 3000, 3))) == (8, 12)
     assert Analyser(JumpConfig(jump_width=1)).sizes(np.zeros((1, 3000, 3)))[0] == 1
+
+
+def test_gap_rule_excludes_the_line_of_a_short_distance():
+    from line_analysis.jumps import gap_rule, spacing_with_rule
+    xs = list(100 + 100 * np.arange(10))
+    kept, excluded, parts = gap_rule(xs + [430])              # 30 px from 400: too close
+    assert excluded == [430] and kept == xs and len(parts) == 1
+    sp = spacing_with_rule(xs + [430, 455])                   # two false lines
+    assert sorted(sp.excluded) == [430, 455] and np.isclose(sp.spacing, 100)
+    assert sp.n_extra == 2
+    kept, excluded, _ = gap_rule(xs + [120])                  # at the end: the false one goes
+    assert excluded == [120]
+
+
+def test_gap_rule_leaves_long_distances_out():
+    from line_analysis.jumps import spacing_with_rule
+    xs = np.r_[100 + 100 * np.arange(5), 900 + 103 * np.arange(5)]   # 500 -> 900: 4x
+    sp = spacing_with_rule(xs)
+    assert sp.long_gaps == [(500, 900)] and not sp.excluded
+    # parts: 4 steps of 100 and 4 of 103; the long distance does not count
+    assert np.isclose(sp.spacing, (400 + 412) / 8)
+    assert sp.n_missing == 3
+
+
+def test_gap_rule_keeps_regular_lines_and_one_missed_line():
+    from line_analysis.jumps import spacing_with_rule
+    xs = np.delete(100 + 100 * np.arange(12), 5)              # one 2x gap: 1.8x the average
+    sp = spacing_with_rule(xs)
+    assert not sp.excluded and not sp.long_gaps
+    assert np.isclose(sp.spacing, 100) and sp.n_missing == 1   # the grid fit handles it
+
+
+def test_false_line_in_the_preparation_is_excluded(dirs):
+    inp, out = dirs
+    _folder(inp, [np.r_[GRID, GRID[3] + 30], GRID, GRID])
+    main_jumps("j", out, inp, interactive=False, show=False)
+    params = json.loads((out / "jumps" / "j" / "parameters.json").read_text())
+    assert len(params["preparations"][0]["initial_positions"]) == 12
+    rec = _read(out)
+    assert all(abs(float(r["mean_spacing_px"]) - 100) < 0.5 for r in rec)
