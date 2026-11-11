@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 from .calibration import COEFF, OBJECTIVES, PE300_W_PER_PCT, PX_TO_UM, THETA
-from .fits import FIT_CHOICES, fit_curve
+from .fits import FIT_CHOICES, fit_curve, outlier_mask
 from .calibration import px_to_um as calibrated_px_to_um
 from .logs import LEVELS, companion, level_column, ramp_files, read_log, read_ramp
 
@@ -218,7 +218,7 @@ def linear_fit(x, y):
 
 
 FITS_COLUMNS = ["y", "x", "direction", "model", "formula", "params", "slope", "intercept",
-                "slope_at_mean_x", "r2", "rmse", "aicc", "n"]
+                "slope_at_mean_x", "r2", "rmse", "aicc", "n", "n_excluded"]
 
 
 def _fit_label(direction, fit):
@@ -228,7 +228,7 @@ def _fit_label(direction, fit):
 
 
 def plot_report(table, info, out_png, name="", objective="20x", theta="0.8wt",
-                px_to_um=PX_TO_UM, fits_csv=None, fit="auto"):
+                px_to_um=PX_TO_UM, fits_csv=None, fit="auto", reject_outliers=True):
     """Average distance and pitch against the level, power and time.
 
     Up and down branches of the ramp are drawn separately (hysteresis shows),
@@ -237,6 +237,10 @@ def plot_report(table, info, out_png, name="", objective="20x", theta="0.8wt",
     'saturating', 'power', 'mm'), 'auto' (the best by AICc for each branch and
     axis) or 'none'. The fits are written to ``fits_csv`` if given. Photos with
     a warning are left out. Returns the number of photos plotted.
+
+    With ``reject_outliers`` the photos far from the trend of their branch
+    (fits.outlier_mask on distance against the level, e.g. a photo where every
+    second line was missed) are left out of the fits and drawn hollow.
     """
     from .style import DIRECTION_STYLE, MUTED, figure, finish
 
@@ -253,6 +257,10 @@ def plot_report(table, info, out_png, name="", objective="20x", theta="0.8wt",
         ok["power[mW]"] = ok["power[W]"] * 1e3
 
     xs = _x_axes(table, info, objective)
+    ok["excluded"] = False
+    if reject_outliers and fit != "none":
+        for _, part in ok.groupby("direction", sort=False):
+            ok.loc[part.index, "excluded"] = outlier_mask(part[xs[0][0]], part["distance"], fit)
     fits = []
     ys = [("distance", "average distance [µm]"), ("pitch", f"pitch [µm] ({theta})")]
     fig, axes = figure(2, len(xs), figsize=(5 * len(xs), 8), sharey="row", squeeze=False)
@@ -262,22 +270,28 @@ def plot_report(table, info, out_png, name="", objective="20x", theta="0.8wt",
             fit_handles = []
             for direction, part in ok.groupby("direction", sort=False):
                 color, marker = DIRECTION_STYLE.get(direction, (MUTED, "s"))
-                ax.scatter(part[xcol], part[ycol], s=30, color=color, marker=marker,
+                inl, exc = part[~part["excluded"]], part[part["excluded"]]
+                ax.scatter(inl[xcol], inl[ycol], s=30, color=color, marker=marker,
                            edgecolors="white", linewidths=1, label=f"ramp {direction}",
                            zorder=3)
+                if len(exc):
+                    ax.scatter(exc[xcol], exc[ycol], s=30, facecolors="none",
+                               edgecolors=color, marker=marker, linewidths=1,
+                               label=f"{direction}: left out of the fit", zorder=3)
                 if xcol == "time[s]" or fit == "none":
                     continue
-                f = fit_curve(part[xcol], part[ycol], fit)
+                f = fit_curve(inl[xcol], inl[ycol], fit)
                 if f is None:
                     continue
-                xmean = float(np.nanmean(part[xcol]))
+                xmean = float(np.nanmean(inl[xcol]))
                 fits.append({"y": ycol, "x": xcol, "direction": direction,
                              "model": f.model, "formula": f.formula, "params": f.describe(8),
                              "slope": f.params[0] if f.model == "linear" else np.nan,
                              "intercept": f.params[1] if f.model == "linear" else np.nan,
                              "slope_at_mean_x": f.slope_at(xmean), "r2": f.r2,
-                             "rmse": f.rmse, "aicc": f.aicc, "n": f.n})
-                xx = np.linspace(np.nanmin(part[xcol]), np.nanmax(part[xcol]), 200)
+                             "rmse": f.rmse, "aicc": f.aicc, "n": f.n,
+                             "n_excluded": int(len(exc))})
+                xx = np.linspace(np.nanmin(inl[xcol]), np.nanmax(inl[xcol]), 200)
                 line, = ax.plot(xx, f.predict(xx), color=color, lw=1.5, zorder=2,
                                 label=_fit_label(direction, f))
                 fit_handles.append(line)
@@ -378,7 +392,8 @@ def choose_px_to_um(px_to_um=None, camera=None, objective=None, photo_dir=None, 
 
 def main_report(name, ramp=None, results=None, output_dir=None, objective=None,
                 theta="0.8wt", px_to_um=None, camera_offset_s=0.0, liv=None,
-                color=None, camera="auto", input_dir=None, fit="auto"):
+                color=None, camera="auto", input_dir=None, fit="auto",
+                reject_outliers=True):
     """Align, save and plot -> <output_dir>/report/<name>/data.csv, plots.png, timeline.png.
 
     ``results`` defaults to ``name`` (the folder name used with 'analysis folder').
@@ -407,7 +422,7 @@ def main_report(name, ramp=None, results=None, output_dir=None, objective=None,
     plot_path, timeline_path = out_dir / "plots.png", out_dir / "timeline.png"
     fits_path = out_dir / "fits.csv"
     plotted = plot_report(table, info, plot_path, name, objective, theta, px_to_um,
-                          fits_csv=fits_path, fit=fit)
+                          fits_csv=fits_path, fit=fit, reject_outliers=reject_outliers)
     plot_timeline(table, info, timeline_path, name, theta, px_to_um)
     return {"table": table, "ramp_path": str(ramp_path), "results_path": str(results_path),
             "csv_path": str(csv_path), "plot_path": str(plot_path),

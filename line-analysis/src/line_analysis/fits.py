@@ -6,6 +6,7 @@ best value, and the others by least squares, so a fit cannot fail to converge.
 
     fit_curve(x, y, "auto")   -> Fit or None
     fit.predict(xx)           -> y on new x
+    outlier_mask(x, y, "auto") -> True for points far from the trend
 """
 from dataclasses import dataclass
 
@@ -106,8 +107,9 @@ def _shape_grid(model, x):
     span = float(np.ptp(x)) or 1.0
     if model == "power":
         return np.geomspace(0.1, 5, 200)
-    # k or K from 1/50 to 50 times the x range
-    return np.geomspace(span / 50, span * 50, 200)
+    # k or K from 1/10 to 50 times the x range: a smaller k turns the curve into a
+    # step that a few stray points can pull anywhere
+    return np.geomspace(span / 10, span * 50, 200)
 
 
 def _fit_one(model, x, y):
@@ -164,3 +166,57 @@ def fit_curve(x, y, model="linear"):
     aic = n * np.log(rss_n) + 2 * k
     aicc = aic + (2 * k * (k + 1) / (n - k - 1) if n - k - 1 > 0 else np.inf)
     return Fit(model, params, float(r2), float(np.sqrt(rss / n)), float(aicc), n)
+
+
+# ---------------------------------------------------------------------------
+# outliers
+# ---------------------------------------------------------------------------
+OUTLIER_Z = 3.5        # robust sigmas (1.4826 * MAD) from the fitted curve
+
+
+def _theil_sen(x, y):
+    i, j = np.triu_indices(len(x), 1)
+    dx = x[j] - x[i]
+    ok = dx != 0
+    slope = float(np.median((y[j] - y[i])[ok] / dx[ok])) if ok.any() else 0.0
+    return slope, float(np.median(y - slope * x))
+
+
+def _robust_sigma(r, y):
+    sigma = 1.4826 * float(np.median(np.abs(r - np.median(r))))
+    return max(sigma, 1e-6 * (float(np.ptp(y)) or 1.0))
+
+
+def outlier_mask(x, y, model="auto", z=OUTLIER_Z, max_iter=10):
+    """True for points more than ``z`` robust sigmas from the fitted trend.
+
+    Start: a Theil-Sen line (unaffected by up to ~29 % of wild points). Then
+    repeat: fit ``model`` to the points kept so far, measure every point
+    against it, keep the points within z * 1.4826 * MAD. Points can come back
+    in a later round. Non-finite points are never outliers (they are skipped
+    by the fits anyway). Too few points for the model: nothing is rejected.
+    """
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    finite = np.isfinite(x) & np.isfinite(y)
+    out = np.zeros(len(x), dtype=bool)
+    xf, yf = x[finite], y[finite]
+    n = len(xf)
+    k = 4 if model == "auto" else len(PARAM_NAMES.get(model, (0, 0)))
+    if n < max(k + 3, 5) or np.ptp(xf) == 0:
+        return out
+    slope, intercept = _theil_sen(xf, yf)
+    r = yf - (slope * xf + intercept)
+    keep = np.abs(r) <= z * _robust_sigma(r, yf)
+    for _ in range(max_iter):
+        if keep.sum() < max(k + 2, 3):
+            return out                            # cannot tell; reject nothing
+        f = fit_curve(xf[keep], yf[keep], model)
+        if f is None:
+            return out
+        r = yf - f.predict(xf)
+        new = np.abs(r) <= z * _robust_sigma(r[keep], yf)
+        if np.array_equal(new, keep):
+            break
+        keep = new
+    out[np.flatnonzero(finite)[~keep]] = True
+    return out

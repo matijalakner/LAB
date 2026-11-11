@@ -54,3 +54,36 @@ def test_choices():
 
 def test_auto_with_three_points_is_a_line():
     assert fit_curve([0, 50, 100], [1, 2, 4], "auto").model == "linear"
+
+
+def _noisy_saturating(seed, n=100):
+    rng = np.random.default_rng(seed)
+    x = np.repeat(np.linspace(0, 100, n // 5), 5)
+    return x, 188 + 62 * (1 - np.exp(-x / 35)) + rng.normal(0, 1.5, x.size)
+
+
+def test_outliers_from_missed_lines_are_found():
+    from line_analysis.fits import outlier_mask
+    x, y = _noisy_saturating(2)
+    bad = np.zeros(x.size, bool)
+    bad[10:14] = True            # every third line missed: 1.5x
+    bad[25:35:2] = True          # every second line missed: 2x
+    y = np.where(bad, y * np.where(np.arange(x.size) < 20, 1.5, 2.0), y)
+    out = outlier_mask(x, y, "auto")
+    assert np.array_equal(out, bad)
+    f = fit_curve(x[~out], y[~out], "saturating")
+    assert abs(f.params[1] - 35) < 5 and f.r2 > 0.98
+
+
+def test_clean_data_keeps_its_points():
+    from line_analysis.fits import outlier_mask
+    for seed in range(5):
+        x, y = _noisy_saturating(seed)
+        assert outlier_mask(x, y, "auto").sum() <= 1
+    assert not outlier_mask(X, 0.5 * X + 3, "linear").any()      # exact data
+    assert not outlier_mask([0, 1, 2], [0, 10, 0], "auto").any()  # too few to judge
+
+
+def test_no_step_shaped_saturating_fit():
+    f = fit_curve(X, np.where(X > 0, 10.0, 0.0), "saturating")
+    assert f.params[1] >= np.ptp(X) / 10 * 0.999

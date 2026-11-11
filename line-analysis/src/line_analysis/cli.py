@@ -147,6 +147,10 @@ def build_parser():
                           "power (a x^n + c), mm (A x/(K+x) + c), auto = the best by "
                           "AICc of linear/quadratic/saturating/power/mm, or none "
                           "(default auto)")
+    rep.add_argument("--keep-outliers", action="store_true",
+                     help="fit every photo; by default photos far from the trend of "
+                          "their branch (e.g. lines missed) are left out of the fit "
+                          "and drawn hollow")
     rep.add_argument("--camera-offset", type=float, default=0.0,
                      help="seconds added to the photo times (only for matching by time)")
     add_dirs(rep)
@@ -204,7 +208,8 @@ def run(args):
         out = main_report(args.name, args.ramp, args.results, args.output_dir,
                           args.objective, args.sample, args.px_um,
                           args.camera_offset, args.liv, args.color, camera=args.camera,
-                          input_dir=args.input_dir, fit=args.fit)
+                          input_dir=args.input_dir, fit=args.fit,
+                          reject_outliers=not args.keep_outliers)
         print(f"Micrometers per pixel: {out['px_um']:.4g} ({out['px_source']})")
         print(f"Ramp: {out['ramp_path']} ({out['level']})")
         print(f"{out['photos']} photos matched by {out['matched_by']}, "

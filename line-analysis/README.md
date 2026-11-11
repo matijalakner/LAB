@@ -176,6 +176,7 @@ This command lines the results of `analysis folder NAME` up with a ramp.
 | `--px-um` | micrometres per pixel; overrides `--camera` / `--objective` |
 | `--input-dir` | where the photos are, to read the camera from them (default `<data>/input`) |
 | `--fit` | function fitted to each branch on the level and power axes (default `auto`, see below) |
+| `--keep-outliers` | fit every photo (by default photos far from the trend are left out, see below) |
 | `--camera-offset` | seconds added to the photo times when they are matched by time |
 
 **Fit** (`--fit`): one fit per ramp direction (up and down separately), for distance and pitch, on the level and the power axis. Photos with a warning are left out.
@@ -190,6 +191,10 @@ This command lines the results of `analysis folder NAME` up with a ramp.
 | `mm` | `A·x/(K + x) + c` (Michaelis–Menten) |
 | `auto` (default) | the one of linear, quadratic, saturating, power and mm with the lowest AICc, chosen for each branch and axis separately |
 | `none` | no fit, only the points |
+
+**Outliers.** A photo where the detection missed every second line gives twice the real spacing, and a run of such photos is not caught by the folder warnings. By default the report finds them before fitting: it starts from a Theil–Sen line, fits the chosen function, and leaves out every photo more than 3.5 robust sigmas (1.4826 × MAD of the residuals) from it, repeating until the set stops changing. This is decided once per branch on distance against the level, so the same photos are left out of every panel. They are drawn as hollow markers and counted in `n_excluded` in `fits.csv`; they stay in `data.csv`. `--keep-outliers` turns this off. If many photos are left out, look at their marked photos and rerun `analysis folder` (e.g. with `--track`).
+
+The saturating and Michaelis–Menten fits keep k and K at least a tenth of the x range, so a few stray points cannot turn the curve into a step.
 
 The nonlinear fits use only numpy: the shape parameter (k, n or K) is searched on a grid and the others are solved by least squares, so they always converge. In Python: `fit_curve(x, y, "saturating")` from `line_analysis.fits`.
 
@@ -211,7 +216,7 @@ output/report/<name>/
 │                 the up and down branches of the ramp are drawn separately
 │                 with a fit per branch on the level and power axes (--fit)
 ├── fits.csv      y, x, direction, model, formula, params, slope, intercept (linear
-│                 only), slope_at_mean_x, r2, rmse, aicc, n of every fit
+│                 only), slope_at_mean_x, r2, rmse, aicc, n, n_excluded of every fit
 └── timeline.png  level, power and pitch on the ramp's own time axis
 ```
 
