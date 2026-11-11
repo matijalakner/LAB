@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from .detect import DetectionConfig, detect_lines, mark_image, plot_line_signal
+from .detect import DetectionConfig, detect_lines, mark_grid, plot_line_signal
 
 
 EDGE_CROP = 100   # px cut off the left and the right edge before the analysis
@@ -68,7 +68,8 @@ def analyse_image(image_path, out_dir, config=None, plot=False, write_csv=True,
     """Detect the vertical lines in one image file and save the results.
 
     Writes into ``out_dir`` (created if needed):
-        <name>_marked.png   the image (same size) with the lines painted red
+        <name>_marked.png   the image with the lines painted red (extra lines
+                            cyan, missed ones dotted yellow, see mark_grid)
         <name>_lines.csv    line, x_px, spacing_px      (write_csv=True)
         <name>_signal.png   line-strength plot          (plot=True)
 
@@ -92,7 +93,7 @@ def analyse_image(image_path, out_dir, config=None, plot=False, write_csv=True,
               "edge_crop": edge}
     if save_marked:
         # compress_level=1: ~3x faster than the default for a file only 5 % bigger
-        Image.fromarray(mark_image(img, xs, config.half_width)).save(marked_path,
+        Image.fromarray(mark_grid(img, xs, config.half_width)).save(marked_path,
                                                                      compress_level=1)
     if write_csv:
         csv_path = out_dir / f"{name}_lines.csv"

@@ -81,7 +81,8 @@ Paths below are inside the [data folder](#where-the-data-is) (`LAB/data`): `inpu
 
 ```text
 output/image/<name>/
-├── <name>_marked.png     the image without the cut edges, lines painted red
+├── <name>_marked.png     the image without the cut edges, lines painted red (extra lines cyan,
+│                         missed ones dotted yellow, see "Spacing" below)
 ├── <name>_lines.csv      line, x_px (from the cut edge), spacing_px
 └── <name>_signal.png     line-strength plot (only with --plot)
 ```
@@ -118,10 +119,12 @@ This command reads `output/video/<name>/lines.csv`. It writes `spacing.csv` (`ti
 
 ```text
 output/folder/<name>/
-├── results.csv       time_stamp, photo, file, mean_spacing_px, n_lines, std_spacing_px, warning, time_source
+├── results.csv       time_stamp, photo, file, mean_spacing_px, n_lines, std_spacing_px, warning,
+│                     time_source, n_missing, n_extra
 ├── parameters.json   the settings used
 ├── tuning/           every tuning attempt
-└── <photo>_marked.png   the middle 300 px without the cut edges, lines painted red
+└── <photo>_marked.png   the middle 300 px without the cut edges, lines painted red,
+                         extra lines cyan, missed lines dotted yellow
 ```
 
 A photo with fewer than 300 rows gets a `failed` warning.
@@ -132,7 +135,9 @@ A photo with fewer than 300 rows gets a `failed` warning.
 
 This mode also writes `strips/<photo>_strip.png`: the middle 100 px rows of 6 evenly spread photos. They are cut from the original photos (full width, no marks), for the first photo and the last photo of each fifth of the series, in capture order: 100 photos give photos 1, 20, 40, 60, 80 and 100.
 
-`warning` is filled in when a photo has fewer than 2 lines, a different line count from its neighbours, or an unusual spread of spacings. `time_stamp` is UTC.
+**Spacing.** The lines of a photo are fitted with a regular grid `x = x0 + i · spacing`: every line gets the nearest grid number `i`. A line further than a quarter of the spacing from its grid position, or a second line at the same position, is **extra** (a false line); a grid position between the first and the last line without a line is **missed**. `mean_spacing_px` is then (last line − first line) / (their grid numbers apart), which is the plain mean of the gaps when nothing is missed or extra. With the plain mean, one missed or one false line among ~10 changed the spacing by ~10 % and made parallel copies of the curve in the report. `n_missing` and `n_extra` count them, and the marked photos show them. `std_spacing_px` is the std of the gaps between neighbouring grid positions.
+
+`warning` is filled in when a photo has fewer than 2 lines, an unusual spread of spacings, or a line count 2 or more away from its neighbours. The count compared is that of the grid (found − extra + missed), so a single missed, false or edge line, which no longer changes the spacing, does not drop a photo from the report. `time_stamp` is UTC.
 
 #### Line tracking (`--track`)
 

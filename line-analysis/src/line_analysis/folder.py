@@ -23,10 +23,10 @@ import numpy as np
 from PIL import Image
 
 from . import contrast as contrast_method
-from .detect import DetectionConfig, check_config, mark_image
+from .detect import DetectionConfig, check_config, mark_grid, mark_image
 from .image import EDGE_CROP, analyse_image, load_image
 from .logs import PHOTO_SUFFIXES, capture_times, resolve_folder
-from .spacing import spacing_stats
+from .spacing import fit_grid, spacing_stats
 from .tune import tune_candidates
 from .utils import write_csv
 
@@ -219,8 +219,28 @@ def choose_parameters(first_photo, out_dir, base=None, interactive=True,
 
 RESULTS_HEADER = [
     "time_stamp", "photo", "file", "mean_spacing_px", "n_lines", "std_spacing_px", "warning",
-    "time_source",
+    "time_source", "n_missing", "n_extra",
 ]
+
+
+def result_row(time_info, n, name, lines, warning=""):
+    """One results.csv row. The spacing comes from the grid fit of the lines
+    (spacing.fit_grid): a missed or a false line does not change it, and how
+    many there were goes to n_missing / n_extra. ``lines`` None = the photo failed.
+    """
+    mean = std = n_missing = n_extra = ""
+    n_lines = 0
+    if lines is not None:
+        n_lines = len(lines)
+        fit = fit_grid(lines)
+        if fit is None:
+            warning = "; ".join(w for w in (warning, "fewer than 2 lines") if w)
+        else:
+            mean = round(fit.spacing, 3)
+            std = "" if np.isnan(fit.std) else round(fit.std, 3)
+            n_missing, n_extra = len(fit.missing), len(fit.extra)
+    return (time_info[0], n, name, mean, n_lines, std, warning, time_info[1],
+            n_missing, n_extra)
 
 def _rolling_median(values, window):
     """Median of each value's neighbourhood (centred, shorter at the ends).
@@ -235,6 +255,14 @@ def _rolling_median(values, window):
                      for i in range(len(values))])
 
 
+LINE_COUNT_JUMP = 2     # lines (on the grid) from the neighbours' median that is flagged
+
+
+def _grid_count(rec):
+    extra, missing = rec.get("n_extra", ""), rec.get("n_missing", "")
+    return rec["n_lines"] - (extra or 0) + (missing or 0)
+
+
 def flag_unusual(rows, window=7, z_max=3.5, min_photos=3, tuning_failed=False):
     """Add warnings to the result rows; returns new rows (same format).
 
@@ -242,7 +270,10 @@ def flag_unusual(rows, window=7, z_max=3.5, min_photos=3, tuning_failed=False):
     ``window`` photos; None = the whole folder), so a slow drift of the spacing
     or of the line count is not flagged, only sudden jumps are.
 
-      * line count: flagged when it differs from the neighbours' median by 1 or more.
+      * line count: the lines the grid fit spans (found - extra + missing, see
+        result_row) is flagged when it differs from the neighbours' median by 2
+        or more. A single line coming and going (at the edge, or missed) does
+        not change the spacing any more, so it is not a reason to drop a photo.
       * std: the ratio std / mean spacing is compared with the neighbours' median.
         The difference is scaled by a robust noise estimate (MAD of all
         differences, never below 5 % of the median ratio) and flagged when
@@ -264,9 +295,9 @@ def flag_unusual(rows, window=7, z_max=3.5, min_photos=3, tuning_failed=False):
 
     usable = [r for r in recs if not r["warning"].startswith("failed")]
     if len(usable) >= min_photos:
-        counts = np.array([r["n_lines"] for r in usable], dtype=float)
+        counts = np.array([_grid_count(r) for r in usable], dtype=float)
         for rec, c, m in zip(usable, counts, _rolling_median(counts, window)):
-            if abs(c - m) >= 1:
+            if abs(c - m) >= LINE_COUNT_JUMP:
                 add(rec, f"{int(c)} lines vs median {m:g}")
 
     valid = [r for r in usable if r["mean_spacing_px"] != "" and r["std_spacing_px"] != ""]
@@ -280,6 +311,16 @@ def flag_unusual(rows, window=7, z_max=3.5, min_photos=3, tuning_failed=False):
                 if abs(z) > z_max:
                     add(rec, f"std {'high' if z > 0 else 'low'} (z={z:+.1f})")
     return [tuple(r[h] for h in RESULTS_HEADER) for r in recs]
+
+
+def _describe_row(row):
+    rec = dict(zip(RESULTS_HEADER, row))
+    text = f"{rec['n_lines']} lines"
+    if rec["n_missing"]:
+        text += f", {rec['n_missing']} missed"
+    if rec["n_extra"]:
+        text += f", {rec['n_extra']} extra"
+    return " ".join(t for t in (text, rec["warning"]) if t)
 
 
 TRACKING_HEADER = ["photo", "file", "status", "n_lines", "widened", "lowered",
@@ -525,7 +566,7 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
 
     def work(photo):
         res = analyse_image(photo, out_dir, config, write_csv=False, middle=middle, edge=edge)
-        return res["lines"], spacing_stats(res["lines"])
+        return res["lines"]
 
     # decoding, the median filters and the PNG encoder release the GIL, so threads help
     workers = max(1, min(4, os.cpu_count() or 1, len(photos)))
@@ -533,20 +574,12 @@ def main_folder(path, output_dir=None, input_dir=None, window=7, z_max=3.5,
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(work, p) for p in photos]
         for n, (photo, fut) in enumerate(zip(photos, futures), start=1):
-            warning, mean, std, n_lines = "", "", "", 0
             try:
-                lines, stats = fut.result()
-                n_lines = len(lines)
-                if stats is None:
-                    warning = "fewer than 2 lines"
-                else:
-                    mean = round(stats[0], 3)
-                    std = "" if np.isnan(stats[1]) else round(stats[1], 3)
+                row = result_row(times[photo], n, photo.name, fut.result())
             except Exception as e:
-                warning = f"failed: {e}"
-            rows.append((times[photo][0], n, photo.name, mean, n_lines, std, warning,
-                         times[photo][1]))
-            print(f"[{n}/{len(photos)}] {photo.name}: {n_lines} lines {warning}")
+                row = result_row(times[photo], n, photo.name, None, f"failed: {e}")
+            rows.append(row)
+            print(f"[{n}/{len(photos)}] {photo.name}: {_describe_row(row)}")
 
     rows = flag_unusual(rows, window=window, z_max=z_max,
                         tuning_failed=tuning["status"] == "fallback")
@@ -593,28 +626,20 @@ def _finish_contrast(photos, times, out_dir, cfg, window, z_max, edge=0):
         img = load_image(photo, MIDDLE_HEIGHT, edge)
         feats = contrast_method.find_features(contrast_method.contrast_profile(img, cfg), cfg)
         lines = contrast_method.select_lines(feats, defects, img.shape[1], cfg)
-        Image.fromarray(mark_image(img, lines)).save(out_dir / f"{photo.stem}_marked.png",
-                                                     compress_level=1)
-        return lines, spacing_stats(lines)
+        Image.fromarray(mark_grid(img, lines)).save(out_dir / f"{photo.stem}_marked.png",
+                                                    compress_level=1)
+        return lines
 
     rows = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(work, p) for p in photos]
         for n, (photo, fut) in enumerate(zip(photos, futures), start=1):
-            warning, mean, std, n_lines = "", "", "", 0
             try:
-                lines, stats = fut.result()
-                n_lines = len(lines)
-                if stats is None:
-                    warning = "fewer than 2 lines"
-                else:
-                    mean = round(stats[0], 3)
-                    std = "" if np.isnan(stats[1]) else round(stats[1], 3)
+                row = result_row(times[photo], n, photo.name, fut.result())
             except Exception as e:
-                warning = f"failed: {e}"
-            rows.append((times[photo][0], n, photo.name, mean, n_lines, std, warning,
-                         times[photo][1]))
-            print(f"[{n}/{len(photos)}] {photo.name}: {n_lines} lines {warning}")
+                row = result_row(times[photo], n, photo.name, None, f"failed: {e}")
+            rows.append(row)
+            print(f"[{n}/{len(photos)}] {photo.name}: {_describe_row(row)}")
 
     rows = flag_unusual(rows, window=window, z_max=z_max)
     flagged = [r for r in rows if r[6]]
@@ -639,15 +664,7 @@ def _finish_tracked(photos, times, out_dir, config, tracking, reference, window,
     fmt = lambda xs: " ".join(f"{x:.1f}" for x in xs)
     for n, rec in enumerate(recs, start=1):
         photo, lines, warning = rec["photo"], rec["lines"], rec["warning"]
-        stats = spacing_stats(lines)
-        mean, std = "", ""
-        if stats is None:
-            warning = "; ".join(w for w in (warning, "fewer than 2 lines") if w)
-        else:
-            mean = round(stats[0], 3)
-            std = "" if np.isnan(stats[1]) else round(stats[1], 3)
-        rows.append((times[photo][0], n, photo.name, mean, len(lines), std, warning,
-                     times[photo][1]))
+        rows.append(result_row(times[photo], n, photo.name, lines, warning))
         track_rows.append((n, photo.name, rec["status"], len(lines), rec["widened"],
                            rec["lowered"], rec["min_factor"], fmt(rec["missing"]),
                            fmt(rec["left"]), fmt(rec["reference"])))

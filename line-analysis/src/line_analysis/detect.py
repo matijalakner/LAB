@@ -177,6 +177,32 @@ def mark_image(img, xs, half_width=1):
     return marked
 
 
+EXTRA_COLOR = (0, 230, 255)      # cyan: a line between grid positions, not used
+MISSING_COLOR = (255, 220, 0)    # yellow, dotted: a grid position without a line
+
+
+def mark_grid(img, xs, half_width=1):
+    """Like mark_image, with the grid fit of the lines shown (spacing.fit_grid).
+
+    Lines on the grid are red, extra lines (between grid positions, not used
+    for the spacing) cyan, and grid positions where a line was missed are
+    dotted yellow.
+    """
+    from .spacing import fit_grid
+    fit = fit_grid(xs)
+    if fit is None:
+        return mark_image(img, xs, half_width)
+    marked = mark_image(img, fit.lines, half_width)
+    w = marked.shape[1]
+    for x in fit.extra:
+        x = int(round(x))
+        marked[:, max(0, x - half_width):min(w, x + half_width + 1)] = EXTRA_COLOR
+    for x in fit.missing:
+        x = int(round(x))
+        marked[::4, max(0, x - half_width):min(w, x + half_width + 1)] = MISSING_COLOR
+    return marked
+
+
 def plot_line_signal(sig, xs, threshold, out_path):
     """Plot the band-averaged line strength with the accepted lines marked."""
     from .style import BLUE, MUTED, ORANGE, figure, finish
