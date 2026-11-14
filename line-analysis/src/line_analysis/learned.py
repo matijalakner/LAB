@@ -157,8 +157,8 @@ class LineModel:
         if self.params is None or self.n_in != X.shape[1]:
             self._init(X.shape[1])
         if self.mu is None:
-            self.mu = X.mean(axis=0)
-            self.sd = X.std(axis=0) + 1e-3
+            self.mu = X.mean(axis=0, dtype=np.float64).astype(np.float32)
+            self.sd = (X.std(axis=0, dtype=np.float64) + 1e-3).astype(np.float32)
         Xn = (X - self.mu) / self.sd
         npos = max(y.sum(), 1.0)
         wpos, wneg = 0.5 / npos, 0.5 / max(len(y) - npos, 1.0)
@@ -166,7 +166,8 @@ class LineModel:
         n = len(y)
         b1, b2, eps = 0.9, 0.999, 1e-8
         for _ in range(epochs):
-            idx = self.rng.permutation(n)[:batch] if n > batch else np.arange(n)
+            # a random batch (drawn with replacement: much faster than shuffling all)
+            idx = self.rng.integers(0, n, batch) if n > batch else np.arange(n)
             xb, yb, wb = Xn[idx], y[idx], w[idx]
             h, z = self._forward(xb)
             p = 1 / (1 + np.exp(-np.clip(z, -30, 30)))
@@ -212,7 +213,7 @@ class LineModel:
         d = np.load(Path(path))
         m = cls(int(d["W1"].shape[0]))
         m.params = {k: d[k].astype(np.float32) for k in ("W1", "b1", "W2", "b2")}
-        m.mu, m.sd = d["mu"], d["sd"]
+        m.mu, m.sd = d["mu"].astype(np.float32), d["sd"].astype(np.float32)
         return m
 
 

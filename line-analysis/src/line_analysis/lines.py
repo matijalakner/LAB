@@ -252,32 +252,45 @@ def track(L, ref, temps, spacing, window=0.1, ncc_min=0.3, stretch=0.06, shift=0
     G = gradient(L)
     if maps is None:
         maps = [match_map(L, t, G) if t is not None else None for t in temps]
-    xs_axis = np.arange(len(L))
     centre = float(np.median(ref)) if len(ref) else 0.0
 
-    def total(pred):
-        v = 0.0
-        for m, x in zip(maps, pred):
-            if m is None or not 0 <= x < len(L) - 1:
+    n = len(L)
+    filled = [None if m is None else np.nan_to_num(m, nan=-1.0) for m in maps]
+
+    def totals(pred):
+        """Sum of the line maps at the predicted positions; pred: (..., lines).
+
+        All candidate rows at once; the lines are added one after another, in
+        the same order as a loop over them would.
+        """
+        v = np.zeros(pred.shape[:-1])
+        for i, m in enumerate(filled):
+            if m is None:
                 continue
-            y = np.interp(x, xs_axis, np.nan_to_num(m, nan=-1.0))
-            v += y
+            x = pred[..., i]
+            ok = (x >= 0) & (x < n - 1)
+            xc = np.where(ok, x, 0.0)
+            k = np.minimum(xc.astype(int), n - 2)
+            f = xc - k
+            y = m[k] + f * (m[k + 1] - m[k])
+            v = v + np.where(ok, y, 0.0)
         return v
 
     best = (-np.inf, 1.0, 0.0)
     if len(ref) >= 2 and spacing:
-        for a in np.linspace(1 - stretch, 1 + stretch, 25):
-            base = centre + a * (ref - centre)
-            for b in np.arange(-shift * spacing, shift * spacing + 1, 2.0):
-                v = total(base + b)
-                if v > best[0]:
-                    best = (v, a, b)
+        A = np.linspace(1 - stretch, 1 + stretch, 25)
+        B = np.arange(-shift * spacing, shift * spacing + 1, 2.0)
+        base = centre + A[:, None] * (ref - centre)[None, :]          # (a, lines)
+        v = totals(base[:, None, :] + B[None, :, None])                # (a, b)
+        i, j = np.unravel_index(int(np.argmax(v)), v.shape)            # first best, as a loop
+        best = (float(v[i, j]), float(A[i]), float(B[j]))
         # finer shift around the best
         _, a, b0 = best
-        for b in np.arange(b0 - 2, b0 + 2.01, 0.5):
-            v = total(centre + a * (ref - centre) + b)
-            if v > best[0]:
-                best = (v, a, b)
+        Bf = np.arange(b0 - 2, b0 + 2.01, 0.5)
+        vf = totals(centre + a * (ref - centre)[None, :] + Bf[:, None])
+        k = int(np.argmax(vf))
+        if vf[k] > best[0]:
+            best = (float(vf[k]), a, float(Bf[k]))
     _, a, b = best
     pred = centre + a * (ref - centre) + b
     r = max(2, int(round(window * spacing))) if spacing else 10

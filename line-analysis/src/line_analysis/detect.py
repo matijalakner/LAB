@@ -46,9 +46,17 @@ class DetectionConfig:
     min_threshold: float = MIN_THRESHOLD   # absolute floor of the threshold (0-255 levels); lower it for dark images
 
 
+try:                                   # exact and ~30x faster; numpy below if missing
+    from scipy.ndimage import median_filter as _scipy_median
+except ImportError:                    # pragma: no cover
+    _scipy_median = None
+
+
 def moving_median(signal, window):
     """Median filter (edge padded): the local 'background' level."""
     window = max(3, int(window) | 1)
+    if _scipy_median is not None:
+        return _scipy_median(np.asarray(signal, dtype=float), size=window, mode="nearest")
     pad = window // 2
     padded = np.pad(signal, pad, mode="edge")
     views = np.lib.stride_tricks.sliding_window_view(padded, window)

@@ -180,7 +180,7 @@ A separate method from `analysis folder`; it writes to `output/jumps/NAME/`. Bui
 
 `--detector learned` is the template detector plus a small **neural network that learns what a line looks like** in your photos (numpy only, nothing to install):
 - **What it learns from:** the lines you accept in the preparation. It trains on many 3-row strips (`--rows`) of that photo from different heights, so it learns how noisy such a thin strip is. Within 1.5 px of an accepted line is "line"; further than 12 % of the spacing is "no line" (dust, scratches, slopes, edges). After that it **keeps learning from every photo without doubts in which every followed line was found**; `--no-learn` stops that.
-- **What it looks at:** at every x, the log brightness and its gradient within ±70 px (of a 6000 px photo, scaled; in units of the local noise, so bright and dark parts look alike) and the classical line strength. One hidden layer of 32 units, about 2 s to train at 2576 px width.
+- **What it looks at:** at every x, the log brightness and its gradient within ±70 px (of a 6000 px photo, scaled; in units of the local noise, so bright and dark parts look alike) and the classical line strength. One hidden layer of 32 units, about 1 s to train at 2576 px width.
 - **How it is used:** the lines are followed as with the template detector (the templates know which line is which, so a jump of the whole row is followed). Then every line is found where √(network probability × template match) is highest, over √(0.5 × 0.3). New lines at the edges must also be confirmed by the network. The quality score stays the template match, so a big change of the line shapes still makes a photo doubtful.
 - **Reusing it:** the trained network is saved as `line_model.npz`; `--model output/jumps/OTHER/line_model.npz` starts a new series from it.
 
@@ -189,9 +189,9 @@ On the photos so far it is about as good as the template detector, not better:
 | | series 08 green (11 photos, 3 rows) | series 08 (8 hand-marked photos, 3 rows) |
 |---|---|---|
 | template | 3 lines missed, 0 false, spacing within 0.51 % | 0 missed, 0 false, within 0.60 % |
-| learned | 2 missed, 0 false, within 0.50 % | 1 missed, 1 false (08_0233, the line jumped ~60 px), within 3.5 % |
+| learned | 2–4 missed (5 training seeds), 0 false, within 0.50–0.85 % | 1 missed, 1 false (08_0233, the line jumped ~60 px), within 3.5 % |
 
-At 08_0233 both detectors follow the wrong edge for the leftmost line. The template run is caught by the 300-row check and prepared again, but only by 0.1 px of the check's 15 px tolerance. The learned detector is about 3× slower. It should help most where dust or scratches on the middle rows look like lines, because it learns them as "no line".
+The training is random (the seed is fixed, so a run is repeatable); the faint lines near the limit are found with some seeds and not with others. At 08_0233 both detectors follow the wrong edge for the leftmost line. The template run is caught by the 300-row check and prepared again, but only by 0.1 px of the check's 15 px tolerance. The learned detector is about 6× slower (0.5 s against 0.1 s per photo at 2576 px width). It should help most where dust or scratches on the middle rows look like lines, because it learns them as "no line".
 
 `--detector threshold` is the earlier detector (largest jump near each line).
 
