@@ -2,6 +2,8 @@ import csv
 import json
 
 import numpy as np
+
+from line_analysis.spacing import trimmed_mean
 import pytest
 from PIL import Image
 
@@ -241,7 +243,7 @@ def test_one_missed_line_is_flagged():
     from line_analysis.jumps import Analyser, Measurement, spacing_with_rule
     xs = list(np.delete(100 + 100 * np.arange(12), 5).astype(float))   # one 2x distance
     sp = spacing_with_rule(xs)
-    assert not sp.excluded and not sp.long_gaps and np.isclose(sp.spacing, 110)
+    assert not sp.excluded and not sp.long_gaps and np.isclose(sp.spacing, 100)  # 2x trimmed
     doubts = Analyser(JumpConfig(check_rows=0)).doubts(Measurement(xs, sp, xs))
     assert any("line may be missing" in d for d in doubts)
 
@@ -250,7 +252,7 @@ def test_uneven_bands_are_kept_with_strengths():
     from line_analysis.jumps import spacing_with_rule
     xs = [100, 400, 680, 1000, 1290, 1392, 1790, 2130]        # like 08_0122: a 102 px band
     sp = spacing_with_rule(xs, strengths=[30, 35, 40, 33, 20, 35, 12, 30])
-    assert sp.lines == xs and np.isclose(sp.spacing, np.mean(np.diff(xs)))
+    assert sp.lines == xs and np.isclose(sp.spacing, trimmed_mean(np.diff(xs)))
     sp = spacing_with_rule(xs + [1340], strengths=[30, 35, 40, 33, 20, 35, 12, 30, 5])
     assert sp.excluded == [1340] and sp.n_extra == 1           # a weak line in the band goes
 

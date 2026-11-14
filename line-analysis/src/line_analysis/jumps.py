@@ -78,7 +78,7 @@ from PIL import Image
 from .contrast import ContrastConfig, sizes
 from .detect import REF_WIDTH, moving_median
 from .image import _read_image
-from .spacing import fit_grid
+from .spacing import _trimmed_k, fit_grid, trimmed_mean
 from .utils import write_csv
 
 NAVY = (0, 0, 128)
@@ -251,6 +251,7 @@ class Spacing:
     residual: float = float("nan")  # rms distance of the lines from the grid, px
     n_missing: int = 0            # missed lines: inside the parts (grid fit) and in long gaps
     n_extra: int = 0              # excluded lines + lines the grid fit put off the grid
+    n_used: int = 0               # distances in the average (after trimming)
 
 
 def average_gap(gaps, low=GAP_LOW, high=GAP_HIGH):
@@ -325,8 +326,9 @@ def gap_rule(xs, low=GAP_LOW, high=GAP_HIGH, strengths=None, weak=WEAK):
 def spacing_with_rule(xs, low=GAP_LOW, high=GAP_HIGH, hint=None, strengths=None):
     """Spacing after the gap rule -> Spacing.
 
-    The spacing is the mean of the distances between neighbouring lines, the
-    distances over high x the average (lines lost there) left out. The lines
+    The spacing is the average distance between neighbouring lines, the
+    distances over high x the average (lines lost there) left out; with more
+    than 3 lines the largest and smallest 10% are left out too (trimmed_mean). The lines
     are not assumed evenly spaced: in real photos the bands differ a lot.
     err is the standard error of that mean. ``hint`` is not used any more.
     """
@@ -334,7 +336,8 @@ def spacing_with_rule(xs, low=GAP_LOW, high=GAP_HIGH, hint=None, strengths=None)
     res = Spacing(kept, excluded, [(p[-1], q[0]) for p, q in zip(parts, parts[1:])])
     gaps = np.concatenate([np.diff(p) for p in parts if len(p) >= 2]) if parts else []
     if len(gaps):
-        res.spacing = float(np.mean(gaps))
+        res.spacing = trimmed_mean(gaps, n_lines=len(kept))
+        res.n_used = len(gaps) - 2 * _trimmed_k(len(gaps), len(kept))
         if len(gaps) > 1:
             res.std = float(np.std(gaps, ddof=1))
             res.err = res.std / np.sqrt(len(gaps))
@@ -569,8 +572,9 @@ class Analyser:
 
         The spread of the band widths is in std_spacing_px; it says how uneven
         the bands are, not how well the spacing is measured. The error of the
-        mean spacing is that of (last - first line) / steps: sqrt(2) x the
-        position error / steps. The position error is the rms difference
+        mean spacing is sqrt(2) x the position error / sqrt(number of distances
+        averaged): with the 10% trimming the distances in the average no longer
+        add up to (last - first line), so each one's error counts. The position error is the rms difference
         between the 3-row lines and the same lines of the check (at least 0.5 px);
         without a check, 1 px of a 2576 px wide photo, scaled.
         """
@@ -584,8 +588,7 @@ class Analyser:
             d = [v for v in d if v <= tol]
             if len(d) >= 2:
                 sigma = max(float(np.sqrt(np.mean(np.square(d)))), 0.5)
-        steps = (sp.lines[-1] - sp.lines[0]) / sp.spacing
-        sp.err = float(np.sqrt(2) * sigma / max(steps, 1))
+        sp.err = float(np.sqrt(2) * sigma / np.sqrt(max(sp.n_used, 1)))
 
     def check_lines(self, img):
         """Lines of the middle ``check_rows`` rows, found as in the preparation.

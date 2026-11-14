@@ -103,11 +103,12 @@ def fit_grid(xs, extra_tol=EXTRA_TOL, iterations=10, hint=None):
     n = np.round((xs - x0) / d).astype(int)
     lines, idx = xs[keep], n[keep]
     if len(lines) < 2 or idx[-1] == idx[0]:
-        return GridFit(float(gaps.mean()), float(xs[0]), list(map(float, xs)),
+        return GridFit(trimmed_mean(gaps), float(xs[0]), list(map(float, xs)),
                        list(range(len(xs))), [], [],
                        float(np.std(gaps, ddof=1)) if len(gaps) > 1 else float("nan"))
-    spacing = float((lines[-1] - lines[0]) / (idx[-1] - idx[0]))
-    x0 = float(lines[0] - idx[0] * spacing)
+    per_step = np.diff(lines) / np.diff(idx)       # distance per grid step
+    spacing = trimmed_mean(per_step, n_lines=len(lines))
+    x0 = float(np.median(lines - idx * spacing))
     steps = np.diff(idx)
     single = np.diff(lines)[steps == 1]
     present = set(idx.tolist())
@@ -115,6 +116,32 @@ def fit_grid(xs, extra_tol=EXTRA_TOL, iterations=10, hint=None):
     return GridFit(spacing, x0, list(map(float, lines)), idx.tolist(),
                    list(map(float, xs[~keep])), [float(x) for x in missing],
                    float(np.std(single, ddof=1)) if len(single) > 1 else float("nan"))
+
+
+TRIM = 0.10     # share of the largest and of the smallest distances left out of the average
+
+
+def trimmed_mean(gaps, trim=TRIM, n_lines=None):
+    """Average distance with the largest and the smallest ``trim`` (10%) left out.
+
+    Only with more than 3 lines (``n_lines``, default len(gaps) + 1); with 3 or
+    fewer it is the plain mean. At least one distance is dropped at each end
+    (10% of a few distances would round to none), and at least one is kept.
+    """
+    g = np.sort(np.asarray(gaps, dtype=float))
+    n_lines = len(g) + 1 if n_lines is None else n_lines
+    if len(g) == 0:
+        return float("nan")
+    k = _trimmed_k(len(g), n_lines, trim)
+    return float(g[k:len(g) - k].mean())
+
+
+def _trimmed_k(n_gaps, n_lines=None, trim=TRIM):
+    """How many distances trimmed_mean leaves out at each end."""
+    n_lines = n_gaps + 1 if n_lines is None else n_lines
+    if n_lines <= 3 or n_gaps < 3:
+        return 0
+    return min(max(1, int(round(trim * n_gaps))), (n_gaps - 1) // 2)
 
 
 def spacing_stats(xs):

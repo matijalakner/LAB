@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 
 import numpy as np
+
+from line_analysis.spacing import trimmed_mean
 import pytest
 from PIL import Image
 
@@ -56,7 +58,9 @@ def test_middle_three_rows_find_every_line(name):
     missed, false = _check(res.spacing.lines, truth)
     assert not missed and not false, (missed, false)
     assert not res.doubtful, res.doubts
-    assert abs(res.spacing.spacing / np.mean(np.diff(truth)) - 1) < 0.005
+    # the trimmed average does not telescope to (last - first) / steps, so the
+    # hand marks' 1-2 px error of single lines counts: within 1 %
+    assert abs(res.spacing.spacing / trimmed_mean(np.diff(truth)) - 1) < 0.01
 
 
 def test_series_with_big_jumps_between_photos():

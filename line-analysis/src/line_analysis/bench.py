@@ -143,9 +143,11 @@ def make_series(spec):
 
 
 def true_spacing(xs, lo, hi):
-    """Mean distance between the neighbouring true lines in [lo, hi] (bands are uneven)."""
+    """Average distance between the neighbouring true lines in [lo, hi], the same
+    trimmed average as the method (spacing.trimmed_mean; bands are uneven)."""
+    from .spacing import trimmed_mean
     inside = [x for x in xs if lo <= x <= hi]
-    return (float(np.mean(np.diff(inside))) if len(inside) >= 2 else None), inside
+    return (trimmed_mean(np.diff(inside)) if len(inside) >= 2 else None), inside
 
 
 def score(found, xs, lo, hi, spacing=None):

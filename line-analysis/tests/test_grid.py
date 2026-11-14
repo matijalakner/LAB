@@ -5,14 +5,14 @@ import pytest
 from PIL import Image
 
 from line_analysis.detect import EXTRA_COLOR, MISSING_COLOR, LINE_COLOR, mark_grid
-from line_analysis.spacing import fit_grid, spacing_stats
+from line_analysis.spacing import fit_grid, spacing_stats, trimmed_mean
 
 RNG = np.random.default_rng(3)
 XS = 250 + 221 * np.arange(10) + RNG.normal(0, 5, 10)
-MEAN = np.diff(XS).mean()
+MEAN = trimmed_mean(np.diff(XS))     # 10% largest and smallest distances left out
 
 
-def test_all_lines_found_gives_the_mean_gap():
+def test_all_lines_found_gives_the_trimmed_mean_gap():
     f = fit_grid(XS)
     assert np.isclose(f.spacing, MEAN) and not f.missing and not f.extra
     assert np.isclose(f.std, np.std(np.diff(XS), ddof=1))
@@ -22,7 +22,9 @@ def test_all_lines_found_gives_the_mean_gap():
 def test_missed_lines_do_not_change_the_spacing():
     for drop in ([4], [1, 7], [3, 4]):                      # one, two apart, two neighbours
         f = fit_grid(np.delete(XS, drop))
-        assert np.isclose(f.spacing, MEAN), drop
+        # a missed line makes one distance per grid step fewer; trimming then
+        # leaves out a slightly different set, so the spacing moves by < 1 %
+        assert np.isclose(f.spacing, MEAN, rtol=1e-2), drop
         assert np.allclose(f.missing, XS[drop], atol=35)
     # dropping an end line shortens the grid, but the spacing stays close
     assert abs(fit_grid(XS[1:]).spacing - MEAN) < 3
@@ -39,7 +41,7 @@ def test_false_lines_are_left_out():
 def test_missed_and_false_together():
     xs = np.r_[np.delete(XS, [2, 6]), XS[5] + 90, XS[8] + 130]
     f = fit_grid(xs)
-    assert np.isclose(f.spacing, MEAN)
+    assert np.isclose(f.spacing, MEAN, rtol=1e-2)
     assert len(f.missing) == 2 and len(f.extra) == 2
 
 
@@ -52,7 +54,7 @@ def test_uneven_spacing_still_fits():
     xs = np.cumsum(np.r_[100, 221 * (1 + 0.06 * np.sin(np.arange(9)))])  # +-6 % gaps
     f = fit_grid(xs)
     assert not f.extra and not f.missing
-    assert np.isclose(f.spacing, np.diff(xs).mean())
+    assert np.isclose(f.spacing, trimmed_mean(np.diff(xs)))
 
 
 def test_few_lines():
@@ -102,3 +104,11 @@ def test_folder_spacing_ignores_missed_and_false_lines(dirs, method):
     assert rec[3]["n_extra"] == "1"
     marked = np.asarray(Image.open(out / "folder" / "g" / "g_0003_marked.png"))
     assert (np.abs(marked[:, :, :].astype(int) - EXTRA_COLOR).sum(axis=2) == 0).any()
+
+
+def test_trimmed_mean_leaves_out_the_largest_and_smallest_10_percent():
+    gaps = np.r_[np.full(18, 100.0), 10.0, 500.0]              # 20 distances: 2 left out
+    assert trimmed_mean(gaps) == 100.0
+    assert trimmed_mean([90, 100, 130]) == 100.0              # 4 lines: one at each end
+    assert trimmed_mean([90, 130]) == 110.0                   # 3 lines: plain mean
+    assert trimmed_mean(np.r_[np.full(28, 100.0), 1, 2, 3, 500, 600, 700]) == 100.0
