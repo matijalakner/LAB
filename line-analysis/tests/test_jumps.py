@@ -117,13 +117,14 @@ def test_no_at_a_count_change_prepares_again(dirs):
     inp, out = dirs
     _folder(inp, [GRID, np.delete(GRID, 4), GRID])
     # prep ok; photo 2 (a line gone) not ok -> prepare again on it: ok; photo 3 has
-    # 12 again, one more than photo 2: ok; at the end photos 2 and 3 are still
-    # doubtful (a line missing): keep both
-    ask = _answers("y", "n", "y", "y", "y", "y")
+    # 12 again, one more than photo 2: ok; at the end only photo 3 is asked (photo 2
+    # was decided by its accepted preparation): keep it
+    ask = _answers("y", "n", "y", "y", "y")
     rows = main_jumps("j", out, inp, JumpConfig(ask="count"), show=False, ask=ask)
     assert len(rows) == 3
     lines = _read(out, file="lines.csv")
-    assert lines[1]["checked"] == "kept"
+    assert lines[1]["checked"] == "prepared again"
+    assert sum(q.startswith("y = keep") for q in ask.asked) == 1
     params = json.loads((out / "jumps" / "j" / "parameters.json").read_text())
     assert [p["photo"] for p in params["preparations"]] == ["j_0000.png", "j_0001.png"]
 
@@ -383,16 +384,18 @@ def test_review_only_of_a_finished_run(dirs):
     cfg = JumpConfig(q_snr=1.01)              # every photo doubtful
     main_jumps("j", out, inp, cfg, interactive=False, show=False, final_review=False)
     before = _read(out)
-    # photo 1: keep; photo 2: prepare again (preparation y), still doubtful -> exclude;
-    # photo 3: exclude
-    ask = _answers("y", "p", "y", "x", "x")
+    # photo 1: keep; photo 2: prepare again (preparation y) -> decided, not shown
+    # again although still doubtful; photo 3: exclude
+    ask = _answers("y", "p", "y", "x")
     rows = review_jumps("j", out, inp, show=False, ask=ask)
     assert len(rows) == 3
+    assert sum(q.startswith("y = keep") for q in ask.asked) == 3
     lines = _read(out, file="lines.csv")
-    assert [l["checked"] for l in lines] == ["kept", "excluded", "excluded"]
+    assert [l["checked"] for l in lines] == ["kept", "prepared again", "excluded"]
     after = _read(out)
     assert after[0]["mean_spacing_px"] == before[0]["mean_spacing_px"]   # not measured again
-    assert "excluded in review" in after[1]["warning"] and "excluded in review" in after[2]["warning"]
+    assert "excluded in review" in after[2]["warning"]
+    assert "excluded in review" not in after[1]["warning"]
     params = json.loads((out / "jumps" / "j" / "parameters.json").read_text())
     assert params["preparations"][-1]["photo"] == "j_0001.png"
     assert params["preparations"][-1]["in_review"]

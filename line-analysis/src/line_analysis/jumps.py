@@ -1084,6 +1084,12 @@ def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=T
                 previous = len(again)
                 checked = "prepared again"
                 res = an.measure(img)
+                # you accepted the lines on this photo: that decides it, even if the
+                # 3-row measurement is still flagged (not asked again)
+                if res.doubtful:
+                    print("  prepared again and accepted; still flagged (kept): "
+                          + "; ".join(res.doubts))
+                break
             sp = res.spacing
             save_marked(img, sp.lines, out_dir / f"{photo.stem}_marked.jpg", sp.excluded)
             an.accept(res)
@@ -1105,7 +1111,8 @@ def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=T
     return _finish(rows, write(rows, line_rows))
 
 
-DECIDED = ("accepted", "kept", "excluded")   # lines.csv "checked": not asked again
+DECIDED = ("accepted", "kept", "excluded", "prepared again")   # lines.csv "checked":
+                                                              # not asked again
 
 
 def review_jumps(path, output_dir=None, input_dir=None, show=True, ask=input):
@@ -1232,9 +1239,10 @@ def _review(rows, line_rows, measured, an, out_dir, times, show, ask, note_prepa
                 rows[i] = _row(times[photo], n, photo.name, res)
                 line_rows[i] = _line_row(n, photo.name, an.value, "prepared again", res)
                 measured[i] = (photo, res)
-                if not res.doubtful:
-                    break
-                continue
+                # you accepted the lines on this photo: that decides it (not shown again)
+                print(f"  measured again: {_describe(res.spacing)}"
+                      + (f"; still flagged (kept): {rows[i][11]}" if res.doubtful else ""))
+                break
             print("Please answer y, x, p or q.")
     return rows, line_rows
 
