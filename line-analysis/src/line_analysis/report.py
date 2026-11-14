@@ -17,8 +17,10 @@ How each photo gets its level, in this order:
 
 Power per photo, in this order: the PM400 reading of the photo's step
 (<ramp>_power.csv), the LIV curve interpolated at the photo's level, or for a
-pE-300 ramp the calibrated power ``intensity * PE300_W_PER_PCT[color]``. For a
-DC2200 ramp the calibrated intensity ``current * COEFF[objective]`` is added.
+pE-300 ramp the calibrated power ``intensity * PE300_W_PER_PCT[color]``, or for
+a DC2200 ramp the calibrated power ``dc2200_power_w(current)``. A DC2200 ramp
+also gets the intensity [mW/cm^2] of its calibration, and with an objective the
+calibrated intensity ``current * COEFF[objective]`` [W/um^2].
 """
 from pathlib import Path
 
@@ -26,7 +28,8 @@ from .paths import input_root, output_root
 import numpy as np
 import pandas as pd
 
-from .calibration import COEFF, OBJECTIVES, PE300_W_PER_PCT, PX_TO_UM, THETA
+from .calibration import (COEFF, DC2200_CALIBRATION, OBJECTIVES, PE300_W_PER_PCT, PX_TO_UM,
+                          THETA, dc2200_intensity_mw_cm2, dc2200_power_w)
 from .fits import FIT_CHOICES, fit_curve, outlier_mask
 from .calibration import px_to_um as calibrated_px_to_um
 from .logs import LEVELS, companion, level_column, ramp_files, read_log, read_ramp
@@ -175,6 +178,17 @@ def acquire(ramp_csv, results_csv, camera_offset_s=0.0, liv=None, objective=None
             raise ValueError(f"unknown colour '{color}'; choose from {sorted(PE300_W_PER_PCT)}")
         table["power[W]"] = level * PE300_W_PER_PCT[color]
         power_source = f"pE-300 {color} calibration ({PE300_W_PER_PCT[color]:.4g} W/%)"
+    elif col == "current_A":
+        table["power[W]"] = dc2200_power_w(level)
+        power_source = "DC2200 calibration"
+    if col == "current_A":
+        table["intensity[mW/cm2]"] = dc2200_intensity_mw_cm2(level)
+        lo, hi = DC2200_CALIBRATION[0][0], DC2200_CALIBRATION[-1][0]
+        out = level[np.isfinite(level) & ((level < lo) | (level > hi))]
+        if len(out):
+            print(f"  note: {len(out)} photos at currents outside the DC2200 calibration "
+                  f"({lo * 1e3:.0f}-{hi * 1e3:.0f} mA); their power and intensity are "
+                  f"extrapolated")
     if col == "current_A" and objective:
         if objective not in OBJECTIVES:
             raise ValueError(f"unknown objective '{objective}'; choose from {OBJECTIVES}")
@@ -184,7 +198,7 @@ def acquire(ramp_csv, results_csv, camera_offset_s=0.0, liv=None, objective=None
             print(f"  note: no DC2200 intensity calibration for {objective} "
                   f"(calibration.COEFF has {', '.join(sorted(COEFF))}); intensity axis left out")
 
-    extra = [c for c in ("power[W]", "intensity[W/um2]") if c in table]
+    extra = [c for c in ("power[W]", "intensity[mW/cm2]", "intensity[W/um2]") if c in table]
     optional = [c for c in OPTIONAL_COLUMNS if c in table]
     table = table[BASE_COLUMNS + [label] + extra + RESULT_COLUMNS + optional]
     info = {"level": col, "level_label": label, "quantity": quantity, "unit": unit,
@@ -200,6 +214,10 @@ def _x_axes(table, info, objective):
     axes = [(info["level_label"], f"{info['quantity']} [{info['unit']}]")]
     if "power[W]" in table and table["power[W]"].notna().any():
         axes.append(("power[mW]", "optical power [mW]"))
+    if "intensity[mW/cm2]" in table:
+        axes.append(("intensity[mW/cm2]", "intensity [mW/cm²]"))
+    elif "power[W]" in table and table["power[W]"].notna().any():
+        pass
     elif "intensity[W/um2]" in table:
         axes.append(("intensity[W/um2]", f"intensity [W/µm²] ({objective})"))
     axes.append(("time[s]", "time since the ramp start [s]"))

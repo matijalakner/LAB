@@ -969,7 +969,7 @@ def overview_plot(rows, out_path, title=""):
 
 
 def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=True,
-               show=True, ask=input):
+               show=True, ask=input, final_review=None):
     """``analysis jumps NAME``: preparation, then every photo; see the module doc.
 
     Writes <output_dir>/jumps/<name>/:
@@ -982,6 +982,10 @@ def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=T
       preparation/      the marked photos of every preparation try
       <photo>_marked.jpg  every photo with its lines in navy blue
       line_model.npz    learned detector: the trained network (for --model)
+    At the end, every photo that is still doubtful (and was not kept with y
+    during the run) is shown again: y = keep, x = exclude, p = prepare again,
+    q = stop (``final_review``; default: when ``interactive``; the CLI also does
+    it with --yes unless --no-review).
     Returns the result rows ([] if the first preparation was not accepted).
     """
     from .folder import RESULTS_HEADER, _show_image, get_sorted_photos, result_row
@@ -1095,18 +1099,26 @@ def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=T
               + (f" ({checked})" if checked else "") + (f" {row[6]}" if row[6] else "")
               + ("" if row[11] in ("ok", "") else f" - doubtful: {row[11]}"))
 
-    if interactive and cfg.ask == "review":
+    if interactive if final_review is None else final_review:
         rows, line_rows = _review(rows, line_rows, measured, an, out_dir, times, show, ask,
                                   note_preparation, folder.name)
     return _finish(rows, write(rows, line_rows))
 
 
 def _review(rows, line_rows, measured, an, out_dir, times, show, ask, note_preparation, name):
-    """Review mode: the overview, then every doubtful photo -> (rows, line_rows)."""
+    """End of the run: the overview, then every photo still doubtful -> (rows, line_rows).
+
+    Photos already kept with y during the run are not asked again.
+    """
     from .folder import _show_image
+    doubtful = [i for i, r in enumerate(rows) if r[11] not in ("ok", "")
+                and line_rows[i][4] != "accepted"]
+    if not doubtful:
+        print("\nNo photo is still doubtful.")
+        return rows, line_rows
     over = overview_plot(rows, out_dir / "overview.png", f"{name}: spacing per photo")
-    doubtful = [i for i, r in enumerate(rows) if r[11] not in ("ok", "")]
-    print(f"\nReview: {len(doubtful)} of {len(rows)} photos are doubtful. Overview: {over}")
+    print(f"\nReview: {len(doubtful)} of {len(rows)} photos are still doubtful. "
+          f"Overview: {over}")
     if show and doubtful and not _show_image(over):
         print("  (could not open an image viewer - open the file above yourself)")
     for i in doubtful:
@@ -1119,8 +1131,12 @@ def _review(rows, line_rows, measured, an, out_dir, times, show, ask, note_prepa
             print(f"  marked photo: {marked}")
             if show and not _show_image(marked):
                 print("  (could not open an image viewer - open the file above yourself)")
-            answer = ask("y = keep, x = exclude, p = prepare again on it, q = stop reviewing: "
-                         ).strip().lower()
+            try:
+                answer = ask("y = keep, x = exclude, p = prepare again on it, "
+                             "q = stop reviewing: ").strip().lower()
+            except EOFError:                     # no terminal (e.g. run from a script)
+                print("  (no answer possible here; the photos are left as they are)")
+                return rows, line_rows
             if answer in ("y", "yes"):
                 line_rows[i] = line_rows[i][:4] + ("kept",) + line_rows[i][5:]
                 break

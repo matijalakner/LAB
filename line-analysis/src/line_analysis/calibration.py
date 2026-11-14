@@ -8,6 +8,40 @@ COEFF = {
     "40x": 8.824088200840021e-08,
 }
 
+# DC2200 light source: current [A] -> optical power [W] and intensity [mW/cm^2]
+# (measured 2026-11-14; intensity = power / 0.709 cm^2, the area of a 9.5 mm
+# power-meter sensor). Between the points linear; outside 0.5-2 A extrapolated
+# with the nearest segment and never below 0.
+DC2200_CALIBRATION = (
+    # current [A], power [W], intensity [mW/cm^2]
+    (0.5, 7.0e-3, 9.8),
+    (1.0, 15.1e-3, 21.5),
+    (2.0, 30.0e-3, 42.3),
+)
+
+
+def _dc2200(current_a, column):
+    import numpy as np
+    x = np.array([r[0] for r in DC2200_CALIBRATION])
+    y = np.array([r[column] for r in DC2200_CALIBRATION])
+    c = np.asarray(current_a, dtype=float)
+    out = np.interp(c, x, y)
+    lo, hi = c < x[0], c > x[-1]
+    out = np.where(lo, y[0] + (c - x[0]) * (y[1] - y[0]) / (x[1] - x[0]), out)
+    out = np.where(hi, y[-1] + (c - x[-1]) * (y[-1] - y[-2]) / (x[-1] - x[-2]), out)
+    return np.maximum(out, 0.0)
+
+
+def dc2200_power_w(current_a):
+    """Optical power [W] of the DC2200 light source at ``current_a`` [A]."""
+    return _dc2200(current_a, 1)
+
+
+def dc2200_intensity_mw_cm2(current_a):
+    """Intensity [mW/cm^2] of the DC2200 light source at ``current_a`` [A]."""
+    return _dc2200(current_a, 2)
+
+
 # power on the sample [W] = pE-300 intensity [%] * PE300_W_PER_PCT[colour]
 # (slope of the up branch of the 0-100 % calibration ramps, 2026-11-04)
 PE300_W_PER_PCT = {

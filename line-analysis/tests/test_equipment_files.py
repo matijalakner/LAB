@@ -93,6 +93,27 @@ def test_dc2200_by_time_without_photo_log(dirs):
     assert np.allclose(t["intensity[W/um2]"], t["current[A]"] * COEFF["10x"])
 
 
+def test_dc2200_calibration_gives_power_and_intensity(dirs):
+    """A DC2200 ramp without PM400 or LIV: power and intensity from the calibration
+    (500 mA -> 7.0 mW, 9.8 mW/cm2; 1000 mA -> 15.1 mW, 21.5; 2000 mA -> 30.0 mW, 42.3)."""
+    from line_analysis.calibration import dc2200_intensity_mw_cm2, dc2200_power_w
+    assert np.allclose(dc2200_power_w([0.5, 1.0, 2.0]), [7.0e-3, 15.1e-3, 30.0e-3])
+    assert np.allclose(dc2200_intensity_mw_cm2([0.5, 1.0, 2.0]), [9.8, 21.5, 42.3])
+    assert np.isclose(dc2200_power_w(1.5), (15.1e-3 + 30.0e-3) / 2)      # linear between
+    assert dc2200_power_w(0.0) == 0.0                                    # never negative
+    inp, out = dirs
+    seq = make_ramp(out, "ramp_c", "current_A", [0.5, 1.0, 2.0])
+    make_photos(inp, out, "ramp_c", "c1", seq, "current_A", spacing=lambda x: 40 + 20 * x)
+    main_folder("c1", out, inp, interactive=False, show=False, edge=0)
+    rep = main_report("c1", output_dir=out)
+    t = rep["table"]
+    assert rep["power_source"] == "DC2200 calibration"
+    assert np.allclose(t["power[W]"], dc2200_power_w(t["current[A]"]))
+    assert np.allclose(t["intensity[mW/cm2]"], dc2200_intensity_mw_cm2(t["current[A]"]))
+    fits = pd.read_csv(rep["fits_path"])
+    assert set(fits["x"]) == {"current[A]", "power[mW]", "intensity[mW/cm2]"}
+
+
 def test_liv_curve_gives_the_power_axis(dirs):
     inp, out = dirs
     seq = make_ramp(out, "r", "intensity_pct", [0, 50, 100])

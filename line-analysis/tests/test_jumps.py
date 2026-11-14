@@ -117,12 +117,13 @@ def test_no_at_a_count_change_prepares_again(dirs):
     inp, out = dirs
     _folder(inp, [GRID, np.delete(GRID, 4), GRID])
     # prep ok; photo 2 (a line gone) not ok -> prepare again on it: ok; photo 3 has
-    # 12 again, one more than photo 2: ok
-    ask = _answers("y", "n", "y", "y")
+    # 12 again, one more than photo 2: ok; at the end photos 2 and 3 are still
+    # doubtful (a line missing): keep both
+    ask = _answers("y", "n", "y", "y", "y", "y")
     rows = main_jumps("j", out, inp, JumpConfig(ask="count"), show=False, ask=ask)
     assert len(rows) == 3
     lines = _read(out, file="lines.csv")
-    assert lines[1]["checked"] == "prepared again"
+    assert lines[1]["checked"] == "kept"
     params = json.loads((out / "jumps" / "j" / "parameters.json").read_text())
     assert [p["photo"] for p in params["preparations"]] == ["j_0000.png", "j_0001.png"]
 
@@ -342,3 +343,32 @@ def test_a_big_hole_does_not_remove_good_lines():
     assert np.isclose(sp.spacing, 100) and sp.n_missing == 6
     assert np.isclose(average_gap([100, 100, 100, 700, 100]), 100)
     assert np.isclose(average_gap([98, 102, 100]), 100)
+
+
+def test_the_end_asks_about_every_photo_still_doubtful(dirs):
+    """After the run, photos still doubtful are shown again, except those kept
+    with y during the run; with --yes too (final_review)."""
+    inp, out = dirs
+    _folder(inp, [GRID, GRID, GRID])
+    cfg = JumpConfig(q_snr=1.01)              # no match reaches it: every photo doubtful
+    # prep y, then y for each doubtful photo during the run: nothing left at the end
+    ask = _answers("y", "y", "y", "y")
+    main_jumps("j", out, inp, cfg, show=False, ask=ask)
+    assert sum(q.startswith("Is this okay") for q in ask.asked) == 4
+    assert not any(q.startswith("y = keep") for q in ask.asked)
+    # --yes: nothing asked during the run; at the end every doubtful photo:
+    # keep the first, exclude the others
+    ask = _answers("y", "x", "x")
+    rows = main_jumps("j", out, inp, cfg, interactive=False, show=False, ask=ask,
+                      final_review=True)
+    assert sum(q.startswith("y = keep") for q in ask.asked) == 3
+    assert "excluded in review" not in rows[0][6]
+    assert all("excluded in review" in r[6] for r in rows[1:])
+    lines = _read(out, file="lines.csv")
+    assert [l["checked"] for l in lines] == ["kept", "excluded", "excluded"]
+    # no terminal: the end review stops quietly
+    def eof(_):
+        raise EOFError
+    rows = main_jumps("j", out, inp, cfg, interactive=False, show=False, ask=eof,
+                      final_review=True)
+    assert len(rows) == 3

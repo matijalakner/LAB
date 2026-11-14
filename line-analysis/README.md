@@ -197,7 +197,9 @@ The training is random (the seed is fixed, so a run is repeatable); the faint li
 
 **Quality** (`quality` in `results.csv`: `ok` or the reasons). A photo is doubtful when the median match of its lines is under 0.5, fewer than 75 % of the lines in the picture are found, the spacing changed by more than 8 % from the photo before, a distance is over 1.7× the average (a missed line makes ~2×; the widest real band was 1.4×), or the lines differ from a **300-row check** (`--check-rows`, 0 = off): the same photo's middle 300 rows are searched as in the preparation; a strong line there (1.5× the limit) that is not followed, or a followed line with nothing there even at half the limit, makes the photo doubtful. The check only decides whether to ask; the spacing is always that of the 3 rows.
 
-**Asking** (`--ask`): `doubtful` (default) shows a doubtful photo (`y` keep, `n` prepare again on it, `q` stop); `count` asks when the number of lines changes; `review` asks nothing during the run and then shows `overview.png` and every doubtful photo (`y` keep, `x` exclude, `p` prepare again, `q` stop). `--yes` asks nothing: a doubtful photo is **prepared again automatically** and measured again (`checked` in `lines.csv` says why).
+**Asking** (`--ask`): `doubtful` (default) shows a doubtful photo (`y` keep, `n` prepare again on it, `q` stop); `count` asks when the number of lines changes; `review` asks nothing during the run and then shows `overview.png` and every doubtful photo (`y` keep, `x` exclude, `p` prepare again, `q` stop). `--yes` asks nothing during the run: a doubtful photo is **prepared again automatically** and measured again (`checked` in `lines.csv` says why).
+
+**At the end** (every mode, `--yes` included) every photo that is **still doubtful** is shown once more, except the ones you kept with `y` during the run: `y` keep, `x` exclude (warning, left out of the report), `p` prepare again on it, `q` stop. `--no-review` skips this. Run without a terminal (from a script), it is skipped by itself.
 
 **Gap rule** (every photo and the preparation): a distance below ½ of the average distance (the average of the normal distances) means a possible false line: the weaker line of the pair is excluded, but only if it is weaker than 0.4× the median line, so real narrow bands (two strong lines) stay. A distance over 2× the average (lines lost) is left out of the spacing. Excluded lines are drawn dotted red and counted in `n_extra`; lines lost in long distances and followed lines not found count in `n_missing`.
 
@@ -247,7 +249,15 @@ This command lines the results of `analysis folder NAME` up with a ramp.
 1. **Photo log**: the photo's row in `<ramp>_photos.csv`, with the level, step, cycle and direction recorded when it was taken.
 2. **Time**: if a photo is not in the photo log (for example, a separate time-lapse during the ramp), its time from `results.csv` is compared with the ramp's time stamp. Only photos taken while the ramp ran are kept. `--camera-offset S` corrects a camera clock that is off. It only matters when the time comes from EXIF.
 
-**Power of each photo:** it comes from the PM400 reading of the photo's step (`<ramp>_power.csv`). Without that file it comes from `--liv FILE`, interpolated at the photo's level. For a pE-300 ramp without either, `--color blue|green` gives the power on the sample from the calibration, `intensity × PE300_W_PER_PCT[--color]` (blue 6.334 µW/%, green 5.691 µW/%). For a DC2200 ramp without either, the calibrated intensity `current × COEFF[--objective]` is used. There is no 4x value in `COEFF`, so with `--objective 4x` that axis is left out.
+**Power of each photo:** it comes from the PM400 reading of the photo's step (`<ramp>_power.csv`). Without that file it comes from `--liv FILE`, interpolated at the photo's level. For a pE-300 ramp without either, `--color blue|green` gives the power on the sample from the calibration, `intensity × PE300_W_PER_PCT[--color]` (blue 6.334 µW/%, green 5.691 µW/%). For a DC2200 ramp without either, the power comes from the DC2200 calibration (`calibration.DC2200_CALIBRATION`):
+
+| current | power | intensity |
+|---|---|---|
+| 500 mA | 7.0 mW | 9.8 mW/cm² |
+| 1000 mA | 15.1 mW | 21.5 mW/cm² |
+| 2000 mA | 30.0 mW | 42.3 mW/cm² |
+
+It is linear between the points; outside 500–2000 mA it is extrapolated with the nearest segment (never below 0) and the report says so. The intensity is the power over 0.709 cm², the area of a 9.5 mm power-meter sensor. Every DC2200 report gets the `intensity[mW/cm2]` column and an intensity axis with its own fits, next to current and power. With `--objective`, the older calibrated intensity `current × COEFF[--objective]` in W/µm² is also added to the table. There is no 4x value in `COEFF`, so with `--objective 4x` that column is left out.
 
 | Option | Meaning |
 |---|---|
@@ -295,9 +305,10 @@ These assume a 1× camera adapter. If yours is different (e.g. 0.5×), change `C
 ```text
 output/report/<name>/
 ├── data.csv      time[s], step, cycle, direction, current[A] | intensity[%],
-│                 power[W] and/or intensity[W/um2], mean_spacing_px, std_spacing_px,
+│                 power[W], intensity[mW/cm2] (DC2200) and/or intensity[W/um2],
+│                 mean_spacing_px, std_spacing_px,
 │                 warning, n_lines, file
-├── plots.png     distance and pitch against level, power (or intensity) and time;
+├── plots.png     distance and pitch against level, power, intensity and time;
 │                 the up and down branches of the ramp are drawn separately
 │                 with a fit per branch on the level and power axes (--fit)
 ├── fits.csv      y, x, direction, model, formula, params, slope, intercept (linear

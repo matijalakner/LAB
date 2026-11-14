@@ -180,6 +180,10 @@ def build_parser():
                      help="do not ask: keep the first preparation; a doubtful photo is "
                           "prepared again automatically")
     jmp.add_argument("--no-show", action="store_true", help="do not open the image viewer")
+    jmp.add_argument("--no-review", action="store_true",
+                     help="at the end, do not show the photos that are still doubtful (by "
+                          "default every one not kept with y is shown: y keep, x exclude, "
+                          "p prepare again, q stop; also with --yes)")
     add_dirs(jmp)
 
     bnc = sub.add_parser("bench", help="Score the detection methods on synthetic photos with "
@@ -284,7 +288,8 @@ def run(args):
                               min_sigma=args.min_sigma, detector=args.detector, ask=args.ask,
                               check_rows=args.check_rows, model=args.model,
                               learn=not args.no_learn),
-                   interactive=not args.yes, show=not args.no_show)
+                   interactive=not args.yes, show=not args.no_show,
+                   final_review=not args.no_review)
     elif args.command == "report":
         from .report import main_report
         out = main_report(args.name, args.ramp, args.results, args.output_dir,
