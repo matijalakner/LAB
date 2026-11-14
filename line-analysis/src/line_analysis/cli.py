@@ -147,10 +147,19 @@ def build_parser():
     jmp.add_argument("--channels", choices=("auto", "mean", "r", "g", "b"), default="auto",
                      help="brightness from: auto = channels weighted by their brightness, "
                           "saturated ones left out (default); mean; or one channel")
-    jmp.add_argument("--detector", choices=("template", "threshold"), default="template",
+    jmp.add_argument("--detector", choices=("template", "learned", "threshold"),
+                     default="template",
                      help="template: every line its own shape from the preparation, found "
-                          "again near where it was (default); threshold: the largest jump "
-                          "near each line (earlier)")
+                          "again near where it was (default); learned: as template, plus a "
+                          "small neural network trained on the accepted lines decides what is "
+                          "a line, and keeps learning from every photo without doubts; "
+                          "threshold: the largest jump near each line (earlier)")
+    jmp.add_argument("--model", metavar="FILE", default=None,
+                     help="learned detector: start from this trained network (line_model.npz "
+                          "of an earlier run) instead of an untrained one")
+    jmp.add_argument("--no-learn", action="store_true",
+                     help="learned detector: learn only from the preparation, not from every "
+                          "photo")
     jmp.add_argument("--ask", choices=("doubtful", "count", "review"), default="doubtful",
                      help="doubtful: ask about photos with a bad quality score (default); "
                           "count: ask when the line count changes; review: ask nothing during "
@@ -273,7 +282,8 @@ def run(args):
                               jump_width=args.jump_width, channels=args.channels,
                               track=not args.no_track, window=args.window,
                               min_sigma=args.min_sigma, detector=args.detector, ask=args.ask,
-                              check_rows=args.check_rows),
+                              check_rows=args.check_rows, model=args.model,
+                              learn=not args.no_learn),
                    interactive=not args.yes, show=not args.no_show)
     elif args.command == "report":
         from .report import main_report

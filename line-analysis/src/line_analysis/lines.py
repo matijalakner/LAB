@@ -235,7 +235,8 @@ def match_map(L, template, G=None):
     return np.clip(ncc_map(L, a), 0, 1) * np.clip(ncc_map(G, b), 0, 1)
 
 
-def track(L, ref, temps, spacing, window=0.1, ncc_min=0.3, stretch=0.06, shift=0.5):
+def track(L, ref, temps, spacing, window=0.1, ncc_min=0.3, stretch=0.06, shift=0.5,
+          maps=None, refine_maps=None):
     """Find the lines ``ref`` (with templates ``temps``) again in profile L.
 
     1. The whole row is stretched (+-stretch around the median line) and
@@ -243,10 +244,14 @@ def track(L, ref, temps, spacing, window=0.1, ncc_min=0.3, stretch=0.06, shift=0
        is largest.
     2. Every line is then refined within +-window of the spacing.
     Returns (positions or None per line, correlation per line, predicted positions).
+    ``maps``: one score map (0..1) per line to use instead of the template
+    matches; ``refine_maps``: other maps for step 2 only (the learned detector
+    aligns the row with the templates and finds every line with its network).
     """
     ref = np.asarray(ref, float)
     G = gradient(L)
-    maps = [match_map(L, t, G) if t is not None else None for t in temps]
+    if maps is None:
+        maps = [match_map(L, t, G) if t is not None else None for t in temps]
     xs_axis = np.arange(len(L))
     centre = float(np.median(ref)) if len(ref) else 0.0
 
@@ -277,7 +282,7 @@ def track(L, ref, temps, spacing, window=0.1, ncc_min=0.3, stretch=0.06, shift=0
     pred = centre + a * (ref - centre) + b
     r = max(2, int(round(window * spacing))) if spacing else 10
     found, score = [], []
-    for m, x in zip(maps, pred):
+    for m, x in zip(refine_maps if refine_maps is not None else maps, pred):
         if m is None or not 0 <= x < len(L):
             found.append(None)
             score.append(np.nan)

@@ -31,6 +31,12 @@ Analysis (every photo, in time order, the first included), detector "template":
   correlation with its own template is over ``ncc_min``. A line not found is
   followed at its predicted position; templates slowly follow the lines; new
   lines beyond the outer ones are found as in the preparation.
+  Detector "learned" (learned.py) is the template detector plus a small neural
+  network that learns from the accepted lines what a line looks like: it is
+  trained on the preparation photo, then on every photo without doubts, and
+  every line is found where sqrt(network probability x template match) is
+  highest (over sqrt(p_min x ncc_min)); new lines at the edges must be
+  confirmed by the network. The network is saved as line_model.npz.
   Detector "threshold" is the earlier one (largest jump near each line).
 
 Quality: a photo is doubtful when the median match of its lines is under
@@ -100,7 +106,11 @@ class JumpConfig:
     jump_width: int = 18          # step over this many px (template: 2 x smoothing)
     template_half: int = 70       # half width of a line's template (px)
     channels: str = "auto"        # auto (weighted by brightness), mean, r, g or b
-    detector: str = "template"    # template (every line its own shape) or threshold
+    detector: str = "template"    # template (every line its own shape), learned (a network
+                                  # trained on the accepted lines) or threshold
+    model: str = None             # learned: start from this saved network (line_model.npz)
+    learn: bool = True            # learned: keep learning from every photo without doubts
+    p_min: float = 0.5            # learned: a line is found where its probability is over this
     track: bool = True            # threshold detector: search near the previous lines
     window: float = None          # search +- this fraction of the spacing; None = 0.1
                                   # (template) / 0.2 (threshold)
@@ -411,6 +421,7 @@ class Measurement:
     strengths: list = None        # per found line (correlation)
     check: list = None            # lines found as in the preparation (check_rows rows)
     lost: list = field(default_factory=list)   # lines followed but not found (predicted x)
+    image: object = None          # learned detector: the photo, to learn from in accept()
 
     @property
     def doubtful(self):
@@ -428,6 +439,10 @@ class Analyser:
         self.templates = []        # one per reference line (template detector)
         self.spacing = None        # spacing of the photo before
         self._width = None
+        self.model = None          # learned detector: the network
+        if cfg.detector == "learned" and cfg.model:
+            from .learned import LineModel
+            self.model = LineModel.load(cfg.model)
 
     # sizes ------------------------------------------------------------------
     def edge_px(self, img):
@@ -484,12 +499,30 @@ class Analyser:
         sp = spacing_with_rule(lines, strengths=[1.0] * len(lines))
         self.spacing = sp.spacing
         self.templates = []
-        if self.cfg.detector == "template":
+        if self.cfg.detector in ("template", "learned"):
             from .lines import log_profile, make_templates
             edge = self.edge_px(img)
             L = log_profile(self.gray(img, self.cfg.prep_rows))
             self.templates = make_templates(L, [x - edge for x in self.reference],
                                             self.line_sizes(img).half)
+        if self.cfg.detector == "learned":
+            self.learn(img, self.reference, epochs=300)
+
+    def learn(self, img, lines, epochs=60):
+        """Teach the network the accepted ``lines`` (whole-photo x) of ``img``."""
+        from .learned import LineModel, training_strips
+        if len(lines) < 2 or not self.spacing:
+            return
+        if self.model is None:
+            self.model = LineModel()
+        edge, sz = self.edge_px(img), self.line_sizes(img)
+        full = self.gray(img, self.cfg.prep_rows)
+        xs = [x - edge for x in lines]
+        X, y = self.model.samples(training_strips(full, self.cfg.rows, n=30), xs,
+                                  self.spacing, sz, lo=min(xs) - 0.5 * self.spacing,
+                                  hi=max(xs) + 0.5 * self.spacing)
+        self.model.add(X, y)
+        self.model.fit(epochs=epochs)
 
     # analysis ----------------------------------------------------------------
     def lines(self, img, reference):
@@ -513,16 +546,39 @@ class Analyser:
         g = self.gray(img, cfg.rows)
         L = log_profile(g)
         ref = [x - edge for x in self.reference]
-        found, score, pred = track(L, ref, self.templates, self.spacing,
-                                   cfg.window or 0.1, cfg.ncc_min, cfg.stretch)
-        lines, strengths, nxt, temps = [], [], [], []
+        learned = cfg.detector == "learned"
+        shape = None
+        if learned:
+            # The whole row of lines is shifted/stretched with the templates (they
+            # know which line is which); then every line is found where
+            # sqrt(probability of a line x match of its own template) is highest:
+            # the network says what is a line, the template which line it is.
+            from .lines import gradient, match_map
+            P = np.clip(self.model.prob(g, sz), 0, 1)
+            G = gradient(L)
+            tmaps = [np.clip(np.nan_to_num(match_map(L, t, G)), 0, 1) if t is not None
+                     else None for t in self.templates]
+            found, score, pred = track(
+                L, ref, self.templates, self.spacing, cfg.window or 0.1,
+                np.sqrt(cfg.p_min * cfg.ncc_min), cfg.stretch,
+                refine_maps=[np.sqrt(P * m) if m is not None else P for m in tmaps])
+            # the quality score stays the template match: a big change of the line
+            # shapes makes the photo doubtful as with the template detector
+            shape = [float(np.interp(x, np.arange(len(L)), m)) if x is not None and m is not None
+                     else np.nan for x, m in zip(found, tmaps)]
+        else:
+            found, score, pred = track(L, ref, self.templates, self.spacing,
+                                       cfg.window or 0.1, cfg.ncc_min, cfg.stretch)
+        lines, strengths, nxt, temps, shapes = [], [], [], [], []
         inside = 0
-        for x, sc, pr, t in zip(found, score, pred, self.templates):
+        for i, (x, sc, pr, t) in enumerate(zip(found, score, pred, self.templates)):
             in_picture = sz.margin <= pr <= len(L) - 1 - sz.margin
             inside += in_picture
             if x is not None:
                 lines.append(x)
                 strengths.append(sc)
+                if shape is not None:
+                    shapes.append(shape[i])
             if x is not None or in_picture:
                 nxt.append(x if x is not None else pr)      # lost: follow the prediction
                 temps.append(t)
@@ -532,6 +588,10 @@ class Analyser:
         # new lines coming into the picture beyond the outer ones
         if lines and self.spacing:
             new, new_st = detect(g, self.value, sz)
+            if learned:      # ... and the network must agree that it is a line
+                ok = [P[max(int(x) - 3, 0):int(x) + 4].max() >= cfg.p_min for x in new]
+                new = [x for x, k in zip(new, ok) if k]
+                new_st = [v for v, k in zip(new_st, ok) if k]
             lo, hi = min(nxt) - 0.6 * self.spacing, max(nxt) + 0.6 * self.spacing
             for x, s in zip(new, new_st):
                 if x < lo or x > hi:
@@ -557,9 +617,11 @@ class Analyser:
         lost_whole = [x + edge for x in lost]
         res = Measurement([x + edge for x in lines], full,
             [nxt[i] + edge for i in keep], None,
-            float(np.median(strengths)) if strengths else 0.0,
+            float(np.nanmedian(shapes)) if shapes and not np.all(np.isnan(shapes))
+            else float(np.median(strengths)) if strengths else 0.0,
             min(len(lines) / inside, 1.0) if inside else 0.0,
             templates=[temps[i] for i in keep], strengths=strengths, lost=lost_whole)
+        res.image = img if learned else None
         res.period = period(L - np.convolve(L, np.ones(sz.win) / sz.win, "same"),
                             sp.spacing)
         if cfg.check_rows:
@@ -609,7 +671,7 @@ class Analyser:
         """Measure one photo -> Measurement (accept() moves the reference on)."""
         cfg = self.cfg
         self._width = img.shape[1]
-        if cfg.detector == "template" and self.templates:
+        if cfg.detector in ("template", "learned") and self.templates:
             res = self._template_measure(img)
         else:
             found, nxt, per = self.lines(img, self.reference)
@@ -662,7 +724,17 @@ class Analyser:
         return out
 
     def accept(self, res):
-        """Take a measurement as the reference for the next photo."""
+        """Take a measurement as the reference for the next photo.
+
+        Learned detector: a photo without doubts is also learned from.
+        """
+        img = getattr(res, "image", None)
+        # only photos where every followed line was found: a lost line would be
+        # taught as "no line"
+        if img is not None and self.cfg.learn and not res.doubtful and res.spacing.lines \
+                and not res.lost and not res.spacing.n_missing:
+            self.learn(img, res.spacing.lines)
+        res.image = None
         self.reference = res.reference
         if res.templates is not None:
             self.templates = res.templates
@@ -909,6 +981,7 @@ def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=T
       overview.png      spacing against the photo number, doubtful photos in red
       preparation/      the marked photos of every preparation try
       <photo>_marked.jpg  every photo with its lines in navy blue
+      line_model.npz    learned detector: the trained network (for --model)
     Returns the result rows ([] if the first preparation was not accepted).
     """
     from .folder import RESULTS_HEADER, _show_image, get_sorted_photos, result_row
@@ -936,6 +1009,8 @@ def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=T
         preparations.append({"photo": photo.name, "contrast_diff_sigma": an.value,
                              "channel_weights": [round(float(w), 4) for w in an.weights],
                              "line_templates": sum(t is not None for t in an.templates),
+                             "line_model_samples": (0 if an.model is None or an.model.y is None
+                                                    else int(len(an.model.y))),
                              "initial_positions": [round(x, 2) for x in lines]})
 
     note_preparation(photos[0], initial)
@@ -949,6 +1024,8 @@ def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=T
     header = RESULTS_HEADER + RESULTS_EXTRA
 
     def write(rows, line_rows):
+        if an.model is not None and an.model.trained:
+            an.model.save(out_dir / "line_model.npz")
         params = dict(asdict(cfg), contrast_diff=an.value, method="jumps",
                       preparations=preparations)
         (out_dir / "parameters.json").write_text(json.dumps(params, indent=2), encoding="utf-8")

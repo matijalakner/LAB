@@ -178,6 +178,21 @@ A separate method from `analysis folder`; it writes to `output/jumps/NAME/`. Bui
 2. A line not found is followed at its predicted position and counted as a missed step of the spacing. Line shapes slowly follow the photos. New lines beyond the outer ones are found as in the preparation.
 3. **Spacing** = the average distance between neighbouring lines (after the gap rule). With more than 3 lines, the largest and the smallest 10 % of the distances are left out of the average (at least one at each end: with 8–11 lines that is one at each end). The bands are uneven, so no regular grid is assumed. `std_spacing_px` is the spread of the distances (how uneven the bands are); `spacing_err_px` is how precisely the spacing is measured, from how far the 3-row lines lie from the same lines found on 300 rows (√2 × position error / √(distances averaged)).
 
+`--detector learned` is the template detector plus a small **neural network that learns what a line looks like** in your photos (numpy only, nothing to install):
+- **What it learns from:** the lines you accept in the preparation. It trains on many 3-row strips (`--rows`) of that photo from different heights, so it learns how noisy such a thin strip is. Within 1.5 px of an accepted line is "line"; further than 12 % of the spacing is "no line" (dust, scratches, slopes, edges). After that it **keeps learning from every photo without doubts in which every followed line was found**; `--no-learn` stops that.
+- **What it looks at:** at every x, the log brightness and its gradient within ±70 px (of a 6000 px photo, scaled; in units of the local noise, so bright and dark parts look alike) and the classical line strength. One hidden layer of 32 units, about 2 s to train at 2576 px width.
+- **How it is used:** the lines are followed as with the template detector (the templates know which line is which, so a jump of the whole row is followed). Then every line is found where √(network probability × template match) is highest, over √(0.5 × 0.3). New lines at the edges must also be confirmed by the network. The quality score stays the template match, so a big change of the line shapes still makes a photo doubtful.
+- **Reusing it:** the trained network is saved as `line_model.npz`; `--model output/jumps/OTHER/line_model.npz` starts a new series from it.
+
+On the photos so far it is about as good as the template detector, not better:
+
+| | series 08 green (11 photos, 3 rows) | series 08 (8 hand-marked photos, 3 rows) |
+|---|---|---|
+| template | 3 lines missed, 0 false, spacing within 0.51 % | 0 missed, 0 false, within 0.60 % |
+| learned | 2 missed, 0 false, within 0.50 % | 1 missed, 1 false (08_0233, the line jumped ~60 px), within 3.5 % |
+
+At 08_0233 both detectors follow the wrong edge for the leftmost line. The template run is caught by the 300-row check and prepared again, but only by 0.1 px of the check's 15 px tolerance. The learned detector is about 3× slower. It should help most where dust or scratches on the middle rows look like lines, because it learns them as "no line".
+
 `--detector threshold` is the earlier detector (largest jump near each line).
 
 **Quality** (`quality` in `results.csv`: `ok` or the reasons). A photo is doubtful when the median match of its lines is under 0.5, fewer than 75 % of the lines in the picture are found, the spacing changed by more than 8 % from the photo before, a distance is over 1.7× the average (a missed line makes ~2×; the widest real band was 1.4×), or the lines differ from a **300-row check** (`--check-rows`, 0 = off): the same photo's middle 300 rows are searched as in the preparation; a strong line there (1.5× the limit) that is not followed, or a followed line with nothing there even at half the limit, makes the photo doubtful. The check only decides whether to ask; the spacing is always that of the 3 rows.
@@ -195,10 +210,13 @@ output/jumps/<name>/
 ├── parameters.json      settings and every preparation (contrast_diff, channel weights,
 │                        number of line templates, initial positions)
 ├── preparation/         try<N>_<photo>.jpg of every preparation try
+├── line_model.npz       --detector learned: the trained network (for --model)
 └── <photo>_marked.jpg   the whole photo, lines in navy blue, excluded lines dotted red
 ```
 
 x positions are those of the whole photo. For the report: `analysis report NAME --results output/jumps/NAME/results.csv` (error bars and weighted fits from `spacing_err_px`).
+
+`tests/test_learned.py` runs the learned detector on 3 photos of series 08 green (`tests/data/green`, lines checked by eye) and on every hand-marked photo.
 
 **Tested on the real photos** (`tests/test_real_photos.py`, 8 photos of series 08, 74 lines):
 - preparation (300 rows): 74/74 lines, no false line;
@@ -348,6 +366,9 @@ line-analysis/
     ├── image.py               load (8/16 bit), detect, mark, save
     ├── video.py               frame selection (real FLIR frame times), video pipeline
     ├── spacing.py             spacing statistics and the spacing plot
+    ├── jumps.py               analysis jumps (preparation, following, quality)
+    ├── lines.py               line strength, templates and following (analysis jumps)
+    ├── learned.py             the learned line detector (jumps --detector learned)
     ├── folder.py              folder analysis, photo times, warnings
     ├── report.py              photo ↔ ramp ↔ power, report plots
     ├── calibration.py         objective, pE-300, sample and pixel-size constants
