@@ -180,6 +180,10 @@ def build_parser():
                      help="do not ask: keep the first preparation; a doubtful photo is "
                           "prepared again automatically")
     jmp.add_argument("--no-show", action="store_true", help="do not open the image viewer")
+    jmp.add_argument("--review", action="store_true",
+                     help="do not analyse: go through the photos of the finished run in "
+                          "output/jumps/NAME that are still doubtful (y keep, x exclude, p "
+                          "prepare again on that photo, q stop) and write the results again")
     jmp.add_argument("--no-review", action="store_true",
                      help="at the end, do not show the photos that are still doubtful (by "
                           "default every one not kept with y is shown: y keep, x exclude, "
@@ -278,6 +282,9 @@ def run(args):
         from dataclasses import replace
         from .bench import DEFAULT_SERIES, run_bench
         run_bench([replace(s, n=args.photos) for s in DEFAULT_SERIES])
+    elif args.command == "jumps" and args.review:
+        from .jumps import review_jumps
+        review_jumps(args.path, args.output_dir, args.input_dir, show=not args.no_show)
     elif args.command == "jumps":
         from .jumps import JumpConfig, main_jumps
         main_jumps(args.path, args.output_dir, args.input_dir,

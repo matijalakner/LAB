@@ -1105,14 +1105,85 @@ def main_jumps(path, output_dir=None, input_dir=None, config=None, interactive=T
     return _finish(rows, write(rows, line_rows))
 
 
+DECIDED = ("accepted", "kept", "excluded")   # lines.csv "checked": not asked again
+
+
+def review_jumps(path, output_dir=None, input_dir=None, show=True, ask=input):
+    """``analysis jumps NAME --review``: the end review of a finished run, without
+    measuring again.
+
+    Reads output/jumps/NAME/ (results.csv, lines.csv, parameters.json) and shows
+    every photo that is still doubtful and was not kept with y: y keep, x exclude,
+    p prepare again on it (only that photo is measured again), q stop. Then
+    results.csv, lines.csv, overview.png and parameters.json are written again.
+    Returns the result rows.
+    """
+    import csv
+    from dataclasses import fields
+    from .folder import RESULTS_HEADER, get_sorted_photos
+    from .logs import resolve_folder
+    from .paths import output_root
+
+    output_dir = output_root(output_dir)
+    folder = resolve_folder(path, input_dir)
+    out_dir = Path(output_dir) / "jumps" / folder.name
+    files = {k: out_dir / f for k, f in (("results", "results.csv"), ("lines", "lines.csv"),
+                                        ("params", "parameters.json"))}
+    missing = [str(f) for f in files.values() if not f.exists()]
+    if missing:
+        raise FileNotFoundError("No finished analysis to review (missing "
+                                + ", ".join(missing) + "). Run 'analysis jumps "
+                                + folder.name + "' first.")
+
+    def read(path):
+        with open(path, newline="", encoding="utf-8") as f:
+            r = list(csv.reader(f))
+        return r[0], [tuple(row) for row in r[1:]]
+
+    header, rows = read(files["results"])
+    rows = [tuple(r[:1]) + (int(r[1]),) + tuple(r[2:]) for r in rows]
+    line_header, line_rows = read(files["lines"])
+    line_rows = [(int(r[0]),) + tuple(r[1:]) for r in line_rows]
+    params = json.loads(files["params"].read_text(encoding="utf-8"))
+    names = {f.name for f in fields(JumpConfig)}
+    cfg = JumpConfig(**{k: v for k, v in params.items() if k in names})
+    if cfg.detector == "learned" and not cfg.model and (out_dir / "line_model.npz").exists():
+        cfg = replace(cfg, model=str(out_dir / "line_model.npz"))
+    an = Analyser(cfg)
+    photos, times = get_sorted_photos(folder, output_dir)
+    by_name = {p.name: p for p in photos}
+    gone = [r[2] for r in rows if r[2] not in by_name]
+    if gone:
+        raise FileNotFoundError(f"photos of the results are not in {folder}: "
+                                + ", ".join(gone[:5]))
+    measured = [(by_name[r[2]], None) for r in rows]
+    preparations = params.get("preparations", [])
+
+    def note_preparation(photo, lines):
+        preparations.append({"photo": photo.name, "contrast_diff_sigma": an.value,
+                             "channel_weights": [round(float(w), 4) for w in an.weights],
+                             "line_templates": sum(t is not None for t in an.templates),
+                             "initial_positions": [round(x, 2) for x in lines],
+                             "in_review": True})
+
+    rows, line_rows = _review(rows, line_rows, measured, an, out_dir, times, show, ask,
+                              note_preparation, folder.name)
+    params["preparations"] = preparations
+    files["params"].write_text(json.dumps(params, indent=2), encoding="utf-8")
+    write_csv(files["lines"], line_header, line_rows)
+    overview_plot(rows, out_dir / "overview.png", f"{folder.name}: spacing per photo")
+    return _finish(rows, write_csv(files["results"], header, rows))
+
+
 def _review(rows, line_rows, measured, an, out_dir, times, show, ask, note_preparation, name):
     """End of the run: the overview, then every photo still doubtful -> (rows, line_rows).
 
-    Photos already kept with y during the run are not asked again.
+    Photos already decided (kept with y during the run, kept or excluded in an
+    earlier review) are not asked again.
     """
     from .folder import _show_image
     doubtful = [i for i, r in enumerate(rows) if r[11] not in ("ok", "")
-                and line_rows[i][4] != "accepted"]
+                and line_rows[i][4] not in DECIDED]
     if not doubtful:
         print("\nNo photo is still doubtful.")
         return rows, line_rows
@@ -1125,9 +1196,11 @@ def _review(rows, line_rows, measured, an, out_dir, times, show, ask, note_prepa
         photo, res = measured[i]
         n = i + 1
         while True:
-            sp = res.spacing
+            # review only (res None): what the finished run wrote
+            what = (_describe(res.spacing) if res is not None
+                    else f"{rows[i][4]} lines, spacing {rows[i][3]} px")
             marked = Path(out_dir) / f"{photo.stem}_marked.jpg"
-            print(f"\n[{n}/{len(rows)}] {photo.name}: {_describe(sp)} - doubtful: {rows[i][11]}")
+            print(f"\n[{n}/{len(rows)}] {photo.name}: {what} - doubtful: {rows[i][11]}")
             print(f"  marked photo: {marked}")
             if show and not _show_image(marked):
                 print("  (could not open an image viewer - open the file above yourself)")

@@ -201,6 +201,8 @@ The training is random (the seed is fixed, so a run is repeatable); the faint li
 
 **At the end** (every mode, `--yes` included) every photo that is **still doubtful** is shown once more, except the ones you kept with `y` during the run: `y` keep, `x` exclude (warning, left out of the report), `p` prepare again on it, `q` stop. `--no-review` skips this. Run without a terminal (from a script), it is skipped by itself.
 
+**Review only** (`analysis jumps NAME --review`): no analysis. It takes the finished run in `output/jumps/NAME/` and shows the photos that are still doubtful and not yet decided: `y` keep, `x` exclude, `p` prepare again on that photo (only that photo is measured again), `q` stop. Then `results.csv`, `lines.csv`, `overview.png` and `parameters.json` are written again. Photos kept or excluded in an earlier review are not asked again.
+
 **Gap rule** (every photo and the preparation): a distance below ½ of the average distance (the average of the normal distances) means a possible false line: the weaker line of the pair is excluded, but only if it is weaker than 0.4× the median line, so real narrow bands (two strong lines) stay. A distance over 2× the average (lines lost) is left out of the spacing. Excluded lines are drawn dotted red and counted in `n_extra`; lines lost in long distances and followed lines not found count in `n_missing`.
 
 ```text

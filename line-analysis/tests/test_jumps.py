@@ -372,3 +372,34 @@ def test_the_end_asks_about_every_photo_still_doubtful(dirs):
     rows = main_jumps("j", out, inp, cfg, interactive=False, show=False, ask=eof,
                       final_review=True)
     assert len(rows) == 3
+
+
+def test_review_only_of_a_finished_run(dirs):
+    """analysis jumps NAME --review: the still doubtful photos of a finished run,
+    without measuring again; p prepares one photo again."""
+    from line_analysis.jumps import review_jumps
+    inp, out = dirs
+    _folder(inp, [GRID, GRID, GRID])
+    cfg = JumpConfig(q_snr=1.01)              # every photo doubtful
+    main_jumps("j", out, inp, cfg, interactive=False, show=False, final_review=False)
+    before = _read(out)
+    # photo 1: keep; photo 2: prepare again (preparation y), still doubtful -> exclude;
+    # photo 3: exclude
+    ask = _answers("y", "p", "y", "x", "x")
+    rows = review_jumps("j", out, inp, show=False, ask=ask)
+    assert len(rows) == 3
+    lines = _read(out, file="lines.csv")
+    assert [l["checked"] for l in lines] == ["kept", "excluded", "excluded"]
+    after = _read(out)
+    assert after[0]["mean_spacing_px"] == before[0]["mean_spacing_px"]   # not measured again
+    assert "excluded in review" in after[1]["warning"] and "excluded in review" in after[2]["warning"]
+    params = json.loads((out / "jumps" / "j" / "parameters.json").read_text())
+    assert params["preparations"][-1]["photo"] == "j_0001.png"
+    assert params["preparations"][-1]["in_review"]
+    # a second review: kept and excluded photos are not asked again
+    ask = _answers()
+    review_jumps("j", out, inp, show=False, ask=ask)
+    assert not ask.asked
+    # nothing to review without a finished run
+    with pytest.raises(FileNotFoundError):
+        review_jumps("nothing", out, inp, show=False, ask=_answers())
